@@ -38,6 +38,10 @@ Thumbs.db
 
 # Project specific
 *.json
+# Allow important .txt files for deployment
+!requirements.txt
+!runtime.txt
+!README.md
 *.txt
 analysis_results.*
 results.*
