@@ -28,9 +28,14 @@ class OverflowDetector(VulnerabilityDetector):
             r'(\w+)\s*--',  # Decrement
             r'\+\+\s*(\w+)',  # Pre-increment
             r'--\s*(\w+)',  # Pre-decrement
+            r'(\w+)\s*\+=\s*(\w+)',  # Addition assignment
+            r'(\w+)\s*-=\s*(\w+)',  # Subtraction assignment
+            r'(\w+)\s*\*=\s*(\w+)',  # Multiplication assignment
+            r'(\w+)\s*/=\s*(\w+)',  # Division assignment
+            r'(\w+)\s*%=\s*(\w+)',  # Modulo assignment
         ]
         
-        # SafeMath usage patterns (including OpenZeppelin)
+        # SafeMath usage patterns (including OpenZeppelin) - Enhanced
         self.safemath_patterns = [
             r'SafeMath\.add\s*\(',
             r'SafeMath\.sub\s*\(',
@@ -39,11 +44,22 @@ class OverflowDetector(VulnerabilityDetector):
             r'SafeMath\.mod\s*\(',
             r'@openzeppelin/contracts/utils/math/SafeMath',
             r'using\s+SafeMath\s+for\s+uint256',
+            r'using\s+SafeMath\s+for\s+uint',
+            r'using\s+SafeMath\s+for\s+uint8',
+            r'using\s+SafeMath\s+for\s+uint16',
+            r'using\s+SafeMath\s+for\s+uint32',
+            r'using\s+SafeMath\s+for\s+uint64',
+            r'using\s+SafeMath\s+for\s+uint128',
             r'Math\.add\s*\(',
             r'Math\.sub\s*\(',
             r'Math\.mul\s*\(',
             r'Math\.div\s*\(',
-            r'Math\.mod\s*\('
+            r'Math\.mod\s*\(',
+            r'@openzeppelin/contracts/utils/math/Math',
+            r'@openzeppelin/contracts/utils/math/SafeCast',
+            r'SafeCast\.toUint256',
+            r'SafeCast\.toUint128',
+            r'unchecked\s*\{',  # Solidity 0.8+ unchecked block
         ]
         
         # Solidity version patterns
@@ -119,6 +135,7 @@ class OverflowDetector(VulnerabilityDetector):
         """Analyze a function for overflow/underflow vulnerabilities."""
         vulnerabilities = []
         func_body = function.get('body', '')
+        func_start_pos = function.get('start_pos', 0)
         
         if not func_body:
             return vulnerabilities
@@ -127,13 +144,31 @@ class OverflowDetector(VulnerabilityDetector):
         for pattern in self.arithmetic_patterns:
             matches = re.finditer(pattern, func_body)
             for match in matches:
+                # Calculate absolute position in content
+                absolute_pos = func_start_pos + match.start()
+                
+                # Check if in unchecked block (Solidity 0.8+)
+                if self._is_solidity_08_plus(solidity_version):
+                    if self._is_in_unchecked_block(content, absolute_pos):
+                        # Operation in unchecked block - potentially unsafe
+                        vuln = self._create_vulnerability(
+                            vuln_type="Integer Overflow/Underflow",
+                            severity="High",
+                            description=f"Arithmetic operation in unchecked block: {match.group(0)}",
+                            line_number=self._get_line_number(content, absolute_pos),
+                            code_snippet=self._get_code_snippet(content, absolute_pos),
+                            recommendation="Operations in unchecked blocks bypass overflow protection. Ensure proper validation."
+                        )
+                        vulnerabilities.append(vuln)
+                        continue
+                
                 if self._is_unsafe_operation(match, solidity_version, has_safemath):
                     vuln = self._create_vulnerability(
                         vuln_type="Integer Overflow/Underflow",
                         severity="High",
                         description=f"Unsafe arithmetic operation detected: {match.group(0)}",
-                        line_number=self._get_line_number(content, match.start()),
-                        code_snippet=self._get_code_snippet(content, match.start()),
+                        line_number=self._get_line_number(content, absolute_pos),
+                        code_snippet=self._get_code_snippet(content, absolute_pos),
                         recommendation=self._get_recommendation(match.group(0), solidity_version, has_safemath)
                     )
                     vulnerabilities.append(vuln)
@@ -172,6 +207,9 @@ class OverflowDetector(VulnerabilityDetector):
         
         # Solidity 0.8+ has built-in overflow protection
         if self._is_solidity_08_plus(solidity_version):
+            # Check if operation is inside unchecked block
+            # This is a simplified check - in full implementation, would need context
+            # For now, assume operations in 0.8+ are safe unless in unchecked block
             return False
         
         # Check if SafeMath is being used
@@ -181,6 +219,38 @@ class OverflowDetector(VulnerabilityDetector):
         
         # No protection available - unsafe
         return True
+    
+    def _is_in_unchecked_block(self, content: str, position: int) -> bool:
+        """Check if position is inside an unchecked block (Solidity 0.8+)."""
+        # Look backwards for unchecked keyword
+        before_position = content[:position]
+        
+        # Find the last unchecked block before this position
+        unchecked_pattern = r'unchecked\s*\{'
+        unchecked_matches = list(re.finditer(unchecked_pattern, before_position))
+        
+        if not unchecked_matches:
+            return False
+        
+        # Get the last unchecked block
+        last_unchecked = unchecked_matches[-1]
+        unchecked_start = last_unchecked.end() - 1  # Position of opening brace
+        
+        # Count braces to find the end of unchecked block
+        brace_count = 0
+        pos = unchecked_start
+        
+        while pos < position and pos < len(content):
+            if content[pos] == '{':
+                brace_count += 1
+            elif content[pos] == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    return False  # We've exited the unchecked block
+            pos += 1
+        
+        # If brace_count > 0, we're still inside the unchecked block
+        return brace_count > 0
     
     def _is_solidity_08_plus(self, version: str) -> bool:
         """Check if Solidity version is 0.8 or higher."""

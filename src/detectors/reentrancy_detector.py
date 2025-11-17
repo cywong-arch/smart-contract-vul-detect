@@ -16,7 +16,7 @@ class ReentrancyDetector(VulnerabilityDetector):
             description="Detects reentrancy vulnerabilities"
         )
         
-        # External call patterns
+        # External call patterns (enhanced)
         self.external_call_patterns = [
             r'\.call\s*\{[^}]*\}\s*\(',  # .call{value: amount}()
             r'\.call\s*\(',              # .call()
@@ -24,7 +24,12 @@ class ReentrancyDetector(VulnerabilityDetector):
             r'\.delegatecall\s*\(',      # .delegatecall()
             r'\.send\s*\(',              # .send()
             r'\.transfer\s*\(',          # .transfer()
-            r'\.callcode\s*\('           # .callcode()
+            r'\.callcode\s*\(',          # .callcode()
+            r'\.staticcall\s*\(',        # .staticcall()
+            r'address\s*\([^)]+\)\s*\.call',  # address(contract).call
+            r'address\s*\([^)]+\)\s*\.transfer',  # address(contract).transfer
+            r'payable\s*\([^)]+\)\s*\.call',  # payable(address).call
+            r'payable\s*\([^)]+\)\s*\.transfer',  # payable(address).transfer
         ]
         
         # State variable patterns that might be modified
@@ -39,13 +44,18 @@ class ReentrancyDetector(VulnerabilityDetector):
             r'(\w+)\s*--',            # Decrement
         ]
         
-        # Reentrancy guard patterns
+        # Reentrancy guard patterns (enhanced)
         self.reentrancy_guard_patterns = [
             r'nonReentrant',
             r'reentrancyGuard',
             r'mutex',
             r'lock',
-            r'ReentrancyGuard'
+            r'ReentrancyGuard',
+            r'@openzeppelin/contracts/security/ReentrancyGuard',
+            r'using\s+ReentrancyGuard',
+            r'ReentrancyGuard\.',
+            r'_status\s*==\s*_NOT_ENTERED',  # OpenZeppelin pattern
+            r'_status\s*!=\s*_ENTERED'  # OpenZeppelin pattern
         ]
         
         # Common state variables that are often modified

@@ -24,11 +24,16 @@ class SolidityParser:
         
         self.arithmetic_operations = ['+', '-', '*', '/', '%', '**']
         self.external_call_patterns = [
-            r'\.call\s*\(',
-            r'\.delegatecall\s*\(',
-            r'\.send\s*\(',
-            r'\.transfer\s*\(',
-            r'\.callcode\s*\('
+            r'\.call\s*\{[^}]*\}\s*\(',  # .call{value: amount}()
+            r'\.call\s*\(',              # .call()
+            r'\.delegatecall\s*\{[^}]*\}\s*\(',  # .delegatecall{gas: 1000}()
+            r'\.delegatecall\s*\(',      # .delegatecall()
+            r'\.send\s*\(',              # .send()
+            r'\.transfer\s*\(',           # .transfer()
+            r'\.callcode\s*\(',          # .callcode()
+            r'\.staticcall\s*\(',        # .staticcall()
+            r'address\s*\([^)]+\)\s*\.call',  # address(contract).call
+            r'address\s*\([^)]+\)\s*\.transfer',  # address(contract).transfer
         ]
     
     def parse_file(self, file_path: str) -> Optional[Dict[str, Any]]:
@@ -121,8 +126,11 @@ class SolidityParser:
         """Extract function definitions with their details."""
         functions = []
         
+        # Enhanced function pattern to catch more variations
+        enhanced_function_pattern = r'function\s+(\w+)\s*\([^)]*\)\s*(?:public|private|internal|external)?\s*(?:view|pure|payable)?\s*(?:returns\s*\([^)]*\))?\s*\{'
+        
         # Find all function definitions
-        func_matches = re.finditer(self.contract_patterns['function'], content)
+        func_matches = re.finditer(enhanced_function_pattern, content)
         
         for match in func_matches:
             func_name = match.group(1)
@@ -137,11 +145,16 @@ class SolidityParser:
             # Check for state mutability
             state_mutability = self._extract_state_mutability(match.group(0))
             
+            # Extract function parameters
+            params_match = re.search(r'function\s+\w+\s*\(([^)]*)\)', match.group(0))
+            parameters = params_match.group(1).split(',') if params_match else []
+            
             functions.append({
                 'name': func_name,
                 'signature': match.group(0),
                 'access_modifiers': access_modifiers,
                 'state_mutability': state_mutability,
+                'parameters': [p.strip() for p in parameters if p.strip()],
                 'body': func_body,
                 'start_pos': func_start,
                 'end_pos': func_start + len(func_body) if func_body else func_start
@@ -238,14 +251,28 @@ class SolidityParser:
         # Count braces to find the matching closing brace
         brace_count = 0
         pos = brace_pos
+        in_string = False
+        string_char = None
         
         while pos < len(content):
-            if content[pos] == '{':
-                brace_count += 1
-            elif content[pos] == '}':
-                brace_count -= 1
-                if brace_count == 0:
-                    return content[brace_pos:pos + 1]
+            char = content[pos]
+            
+            # Handle string literals to avoid counting braces inside strings
+            if char in ['"', "'"] and (pos == 0 or content[pos-1] != '\\'):
+                if not in_string:
+                    in_string = True
+                    string_char = char
+                elif char == string_char:
+                    in_string = False
+                    string_char = None
+            
+            if not in_string:
+                if char == '{':
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        return content[brace_pos:pos + 1]
             pos += 1
         
         return ""

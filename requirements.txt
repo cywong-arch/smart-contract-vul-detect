@@ -3,6 +3,7 @@
 
 # Web application (required)
 flask>=2.0.0
+flask-cors>=3.0.10  # For Remix IDE API CORS support
 
 # CLI utilities (used by web app)
 click>=8.0.0

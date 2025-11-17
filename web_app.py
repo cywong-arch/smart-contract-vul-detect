@@ -26,6 +26,7 @@ if sys.platform.startswith('win'):
             pass
 
 from flask import Flask, render_template_string, request, jsonify, send_file
+from flask_cors import CORS
 import json
 import re
 import tempfile
@@ -33,6 +34,9 @@ from pathlib import Path
 
 # Add src to the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+
+# Import performance utilities
+from utils.performance import PerformanceMonitor, ASTCache, parallel_detect
 
 def clean_unicode_data(data):
     """Clean Unicode characters that might cause encoding issues."""
@@ -157,6 +161,10 @@ def ensure_ascii_safe(data):
         return data
 
 app = Flask(__name__)
+CORS(app)  # Enable CORS for Remix IDE integration
+
+# Initialize performance cache
+ast_cache = ASTCache()
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.config['JSON_AS_ASCII'] = False  # Allow Unicode in JSON responses
 app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False  # Disable pretty printing to avoid encoding issues
@@ -442,10 +450,10 @@ HTML_TEMPLATE = """
         <div class="main-content">
             <div class="upload-section" id="uploadSection">
                 <h3>📁 Select Contract File</h3>
-                <p>Upload a Solidity (.sol) file or drag and drop it here</p>
+                <p>Upload a Solidity (.sol) or Bytecode (.bin) file or drag and drop it here</p>
                 
                 <div class="file-input-wrapper">
-                    <input type="file" id="fileInput" class="file-input" accept=".sol" />
+                    <input type="file" id="fileInput" class="file-input" accept=".sol,.bin" />
                     <button class="file-input-button">Choose File</button>
                 </div>
                 
@@ -459,7 +467,13 @@ HTML_TEMPLATE = """
                     <button class="test-contract-btn" onclick="selectTestContract('vulnerable_time_manipulation.sol')">Time Manipulation Vulnerable</button>
                     <button class="test-contract-btn" onclick="selectTestContract('vulnerable_denial_of_service.sol')">DoS Vulnerable</button>
                     <button class="test-contract-btn" onclick="selectTestContract('vulnerable_unprotected_selfdestruct.sol')">Selfdestruct Vulnerable</button>
-                    <button class="test-contract-btn" onclick="selectTestContract('secure_contract.sol')">Secure Contract</button>
+                    <h4 style="margin-top: 15px; margin-bottom: 10px;">📦 Bytecode Test Contracts</h4>
+                    <button class="test-contract-btn" onclick="selectTestContract('test_reentrancy_only.bin')">Bytecode Reentrancy</button>
+                    <button class="test-contract-btn" onclick="selectTestContract('test_overflow_only.bin')">Bytecode Overflow</button>
+                    <button class="test-contract-btn" onclick="selectTestContract('test_access_control_only.bin')">Bytecode Access Control</button>
+                    <button class="test-contract-btn" onclick="selectTestContract('test_time_manipulation_only.bin')">Bytecode Time Manipulation</button>
+                    <button class="test-contract-btn" onclick="selectTestContract('test_unprotected_selfdestruct_only.bin')">Bytecode Selfdestruct</button>
+                    <button class="test-contract-btn" onclick="selectTestContract('test_denial_of_service_only.bin')">Bytecode DoS</button>
                 </div>
             </div>
             
@@ -506,6 +520,24 @@ HTML_TEMPLATE = """
                         <label for="unprotected_selfdestruct">
                             <strong>Unprotected Selfdestruct</strong><br>
                             <small>Finds unprotected selfdestruct calls</small>
+                        </label>
+                    </div>
+                </div>
+                
+                <h3 style="margin-top: 20px; margin-bottom: 10px;">🧪 Advanced Analysis</h3>
+                <div class="detector-options">
+                    <div class="detector-option">
+                        <input type="checkbox" id="enable_fuzzing">
+                        <label for="enable_fuzzing">
+                            <strong>Fuzzing (Dynamic Analysis)</strong><br>
+                            <small>Generate test inputs and detect input-dependent vulnerabilities</small>
+                        </label>
+                    </div>
+                    <div class="detector-option">
+                        <input type="checkbox" id="enable_optimization">
+                        <label for="enable_optimization">
+                            <strong>Bytecode Optimization</strong><br>
+                            <small>Detect gas optimization opportunities (bytecode files only)</small>
                         </label>
                     </div>
                 </div>
@@ -603,6 +635,14 @@ HTML_TEMPLATE = """
                 
                 formData.append('detectors', JSON.stringify(detectors));
                 
+                // Get advanced analysis options
+                const enable_fuzzing = document.getElementById('enable_fuzzing').checked;
+                const enable_optimization = document.getElementById('enable_optimization').checked;
+                console.log('Fuzzing enabled:', enable_fuzzing);
+                console.log('Optimization enabled:', enable_optimization);
+                formData.append('enable_fuzzing', enable_fuzzing ? 'true' : 'false');
+                formData.append('enable_optimization', enable_optimization ? 'true' : 'false');
+                
                 const response = await fetch('/analyze', {
                     method: 'POST',
                     body: formData
@@ -637,6 +677,92 @@ HTML_TEMPLATE = """
             
             for (const [detector, count] of Object.entries(results.detector_results)) {
                 output += `${detector}: ${count} issues\n`;
+            }
+            
+            // Show fuzzing metrics if available (always show if fuzzing was attempted)
+            if (results.advanced_analysis && results.advanced_analysis.fuzzing) {
+                const fuzzing = results.advanced_analysis.fuzzing;
+                const metrics = fuzzing.metrics || {};
+                
+                output += `\n🧪 Fuzzing Analysis:\n`;
+                
+                // Show error if fuzzing failed
+                if (fuzzing.error) {
+                    output += `  ⚠️  ${fuzzing.error}\n`;
+                } else {
+                    output += `  Functions tested: ${metrics.functions_tested || 0}\n`;
+                    output += `  Iterations: ${metrics.iterations || 0}\n`;
+                    output += `  Fuzzing vulnerabilities: ${metrics.vulnerabilities_found || 0}\n`;
+                    
+                    if (metrics.vulnerabilities_found === 0) {
+                        output += `  ✅ No input-dependent vulnerabilities found\n`;
+                    }
+                    
+                    // Show warnings if any
+                    if (fuzzing.warnings && fuzzing.warnings.length > 0) {
+                        fuzzing.warnings.forEach(warning => {
+                            output += `  ⚠️  ${warning}\n`;
+                        });
+                    }
+                }
+            } else {
+                // Show message if fuzzing checkbox was not checked
+                output += `\n🧪 Fuzzing Analysis: Not enabled\n`;
+                output += `  (Enable "Fuzzing (Dynamic Analysis)" checkbox to use)\n`;
+            }
+            
+            // Show optimization metrics if available
+            if (results.advanced_analysis && results.advanced_analysis.optimization) {
+                const optimization = results.advanced_analysis.optimization;
+                
+                output += `\n🔧 Optimization Analysis:\n`;
+                
+                // Show error if optimization failed
+                if (optimization.error) {
+                    output += `  ⚠️  ${optimization.error}\n`;
+                } else {
+                    const gasAnalysis = optimization.gas_analysis || {};
+                    const savings = optimization.potential_savings || {};
+                    const optimizations = optimization.optimizations || [];
+                    
+                    if (gasAnalysis.total_gas) {
+                        output += `  📊 Gas Usage:\n`;
+                        output += `    Total Estimated Gas: ${gasAnalysis.total_gas.toLocaleString()}\n`;
+                        output += `    Total Opcodes: ${gasAnalysis.total_opcodes || 0}\n`;
+                    }
+                    
+                    if (savings.total_potential_savings) {
+                        output += `  💰 Potential Savings:\n`;
+                        output += `    Total: ${savings.total_potential_savings.toLocaleString()} gas\n`;
+                        output += `    Opportunities: ${savings.optimization_count || 0}\n`;
+                    }
+                    
+                    if (optimizations.length > 0) {
+                        output += `\n  🔧 Optimization Opportunities:\n`;
+                        optimizations.forEach((opt, idx) => {
+                            output += `    ${idx + 1}. ${opt.type || 'Unknown'} (${opt.severity || 'Unknown'})\n`;
+                            output += `       Description: ${opt.description || 'No description'}\n`;
+                            output += `       Potential Savings: ${opt.gas_savings || 0} gas\n`;
+                            if (opt.recommendation) {
+                                output += `       💡 ${opt.recommendation}\n`;
+                            }
+                        });
+                    } else {
+                        output += `  ✅ No optimization opportunities found\n`;
+                    }
+                }
+            } else if (results.advanced_analysis) {
+                // Show message if optimization checkbox was not checked
+                output += `\n🔧 Optimization Analysis: Not enabled\n`;
+                output += `  (Enable "Bytecode Optimization" checkbox to use)\n`;
+            }
+            
+            // Show performance metrics if available
+            if (results.performance) {
+                output += `\n⚡ Performance Metrics:\n`;
+                for (const [operation, time] of Object.entries(results.performance)) {
+                    output += `  ${operation}: ${time.toFixed(3)}s\n`;
+                }
             }
             
             if (results.vulnerabilities.length > 0) {
@@ -702,16 +828,31 @@ def analyze():
         # Note: Console encoding is handled by Flask automatically
         # Import modules
         from parsers.solidity_parser import SolidityParser
+        from parsers.bytecode_parser import BytecodeParser
         from detectors.overflow_detector import OverflowDetector
         from detectors.access_control_detector import AccessControlDetector
         from detectors.reentrancy_detector import ReentrancyDetector
         from detectors.time_manipulation_detector import TimeManipulationDetector
         from detectors.denial_of_service_detector import DenialOfServiceDetector
         from detectors.unprotected_selfdestruct_detector import UnprotectedSelfDestructDetector
+        from detectors.bytecode_overflow_detector import BytecodeOverflowDetector
+        from detectors.bytecode_access_control_detector import BytecodeAccessControlDetector
+        from detectors.bytecode_reentrancy_detector import BytecodeReentrancyDetector
+        from detectors.bytecode_time_manipulation_detector import BytecodeTimeManipulationDetector
+        from detectors.bytecode_unprotected_selfdestruct_detector import BytecodeUnprotectedSelfDestructDetector
+        from detectors.bytecode_denial_of_service_detector import BytecodeDenialOfServiceDetector
         
         # Get detectors selection
         detectors_json = request.form.get('detectors', '[]')
         selected_detectors = json.loads(detectors_json)
+        
+        # Get advanced analysis options
+        enable_fuzzing_str = request.form.get('enable_fuzzing', 'false')
+        enable_fuzzing = enable_fuzzing_str.lower() == 'true'
+        enable_optimization_str = request.form.get('enable_optimization', 'false')
+        enable_optimization = enable_optimization_str.lower() == 'true'
+        print(f"DEBUG: enable_fuzzing form value: '{enable_fuzzing_str}', parsed: {enable_fuzzing}")
+        print(f"DEBUG: enable_optimization form value: '{enable_optimization_str}', parsed: {enable_optimization}")
         
         # Get contract file
         contract_content = None
@@ -724,10 +865,32 @@ def analyze():
             
             if not os.path.exists(contract_path):
                 return jsonify({'success': False, 'error': f'Test contract not found: {test_contract}'})
-                
-            with open(contract_path, 'r') as f:
-                contract_content = f.read()
+            
             contract_filename = test_contract
+            file_ext = os.path.splitext(test_contract)[1].lower()
+            
+            if file_ext == '.bin':
+                # Read bytecode file - try as text first (hex string), then as binary
+                try:
+                    # Try reading as text (hex string)
+                    with open(contract_path, 'r') as f:
+                        hex_content = f.read().strip()
+                    # Remove 0x prefix if present and clean whitespace
+                    hex_content = hex_content.replace('0x', '').replace(' ', '').replace('\n', '').replace('\r', '').replace('\t', '')
+                    # Validate it's a valid hex string
+                    if all(c in '0123456789abcdefABCDEF' for c in hex_content):
+                        contract_content = hex_content
+                    else:
+                        raise ValueError("Not a valid hex string")
+                except:
+                    # If text reading fails, try as binary
+                    with open(contract_path, 'rb') as f:
+                        bytecode_bytes = f.read()
+                    contract_content = bytecode_bytes.hex()
+            else:
+                # Read Solidity file
+                with open(contract_path, 'r') as f:
+                    contract_content = f.read()
             
         elif 'file' in request.files:
             # Use uploaded file
@@ -735,109 +898,278 @@ def analyze():
             if file.filename == '':
                 return jsonify({'success': False, 'error': 'No file selected'})
                 
-            contract_content = file.read().decode('utf-8')
             contract_filename = file.filename
+            # Auto-detect file type
+            file_ext = os.path.splitext(contract_filename)[1].lower()
+            
+            if file_ext == '.bin':
+                # Bytecode file - read as binary/hex
+                contract_content = file.read()
+                # Try to decode as hex string
+                try:
+                    if isinstance(contract_content, bytes):
+                        contract_content = contract_content.decode('utf-8', errors='ignore').strip()
+                except:
+                    # If it's pure binary, convert to hex
+                    contract_content = contract_content.hex()
+            else:
+                # Solidity file - read as text
+                contract_content = file.read().decode('utf-8')
         else:
             return jsonify({'success': False, 'error': 'No file provided'})
         
+        # Auto-detect file type from filename (already set above for test contracts)
+        if 'test_contract' not in request.form:
+            file_ext = os.path.splitext(contract_filename)[1].lower() if contract_filename else '.sol'
+        
         # Save to temporary file for parsing
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.sol', delete=False) as temp_file:
-            temp_file.write(contract_content)
-            temp_path = temp_file.name
+        if file_ext == '.bin':
+            # Bytecode file - save as binary
+            with tempfile.NamedTemporaryFile(mode='wb', suffix='.bin', delete=False) as temp_file:
+                # Write hex string as bytes
+                try:
+                    # Remove 0x prefix if present
+                    hex_content = contract_content.replace('0x', '').replace(' ', '').replace('\n', '').replace('\r', '')
+                    temp_file.write(bytes.fromhex(hex_content))
+                except:
+                    # If already bytes, write directly
+                    if isinstance(contract_content, bytes):
+                        temp_file.write(contract_content)
+                    else:
+                        temp_file.write(contract_content.encode('utf-8'))
+                temp_path = temp_file.name
+        else:
+            # Solidity file - save as text
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.sol', delete=False) as temp_file:
+                temp_file.write(contract_content)
+                temp_path = temp_file.name
         
         try:
-            # Initialize parser and detectors
-            parser = SolidityParser()
+            # Initialize performance monitor
+            perf_monitor = PerformanceMonitor()
+            perf_monitor.start("total_analysis")
             
-            detectors = []
-            if 'overflow' in selected_detectors:
-                detectors.append(OverflowDetector())
-            if 'access_control' in selected_detectors:
-                detectors.append(AccessControlDetector())
-            if 'reentrancy' in selected_detectors:
-                detectors.append(ReentrancyDetector())
-            if 'time_manipulation' in selected_detectors:
-                detectors.append(TimeManipulationDetector())
-            if 'denial_of_service' in selected_detectors:
-                detectors.append(DenialOfServiceDetector())
-            if 'unprotected_selfdestruct' in selected_detectors:
-                detectors.append(UnprotectedSelfDestructDetector())
+            # Auto-detect file type and initialize appropriate parser
+            is_bytecode = file_ext == '.bin'
             
-            # Clean the uploaded file content before parsing
-            try:
-                # Try multiple encodings to read the file
-                encodings = ['utf-8', 'utf-8-sig', 'latin-1', 'cp1252']
-                original_content = None
+            if is_bytecode:
+                # Bytecode analysis
+                parser = BytecodeParser()
                 
-                for encoding in encodings:
+                # Get bytecode hex from contract_content (already converted to hex above)
+                # Remove 0x prefix and whitespace
+                bytecode_hex = contract_content.replace('0x', '').replace(' ', '').replace('\n', '').replace('\r', '').replace('\t', '')
+                
+                # Parse bytecode
+                try:
+                    contract_ast = parser.parse_bytecode(bytecode_hex)
+                    if not contract_ast:
+                        return jsonify({'success': False, 'error': 'Failed to parse bytecode'})
+                except Exception as e:
+                    return jsonify({'success': False, 'error': f'Error parsing bytecode: {str(e)}'})
+                
+                # Initialize bytecode detectors
+                detectors = []
+                if 'overflow' in selected_detectors:
+                    detectors.append(BytecodeOverflowDetector())
+                if 'access_control' in selected_detectors:
+                    detectors.append(BytecodeAccessControlDetector())
+                if 'reentrancy' in selected_detectors:
+                    detectors.append(BytecodeReentrancyDetector())
+                if 'time_manipulation' in selected_detectors:
+                    detectors.append(BytecodeTimeManipulationDetector())
+                if 'denial_of_service' in selected_detectors:
+                    detectors.append(BytecodeDenialOfServiceDetector())
+                if 'unprotected_selfdestruct' in selected_detectors:
+                    detectors.append(BytecodeUnprotectedSelfDestructDetector())
+                
+            else:
+                # Solidity analysis with caching
+                parser = SolidityParser()
+                
+                # Check cache first (only for uploaded files, not test contracts)
+                perf_monitor.start("parsing")
+                contract_ast = None
+                if 'test_contract' not in request.form and temp_path:
+                    contract_ast = ast_cache.get(temp_path)
+                
+                if not contract_ast:
+                    # Clean the uploaded file content before parsing
                     try:
-                        with open(temp_path, 'r', encoding=encoding) as f:
-                            original_content = f.read()
-                        break
-                    except UnicodeDecodeError:
-                        continue
-                
-                if original_content is None:
-                    return jsonify({'success': False, 'error': 'Could not read file with any supported encoding'})
-                
-                # Clean Unicode characters from the file content - be very aggressive
-                cleaned_content = clean_unicode_data(original_content)
-                
-                # Double-check: remove any remaining Unicode characters
-                import re
-                cleaned_content = re.sub(r'[^\x00-\x7F]+', '[UNICODE]', cleaned_content)
-                
-                # Write cleaned content back to temp file with UTF-8 encoding
-                with open(temp_path, 'w', encoding='utf-8') as f:
-                    f.write(cleaned_content)
-                
-                # Verify the cleaning worked
-                with open(temp_path, 'r', encoding='utf-8') as f:
-                    verify_content = f.read()
-                    if any(ord(char) > 127 for char in verify_content):
-                        print("Warning: Unicode characters still present after cleaning")
-                    else:
-                        print("Success: All Unicode characters cleaned from file")
+                        # Try multiple encodings to read the file
+                        encodings = ['utf-8', 'utf-8-sig', 'latin-1', 'cp1252']
+                        original_content = None
+                        
+                        for encoding in encodings:
+                            try:
+                                with open(temp_path, 'r', encoding=encoding) as f:
+                                    original_content = f.read()
+                                break
+                            except UnicodeDecodeError:
+                                continue
+                        
+                        if original_content is None:
+                            return jsonify({'success': False, 'error': 'Could not read file with any supported encoding'})
+                        
+                        # Clean Unicode characters from the file content - be very aggressive
+                        cleaned_content = clean_unicode_data(original_content)
+                        
+                        # Double-check: remove any remaining Unicode characters
+                        import re
+                        cleaned_content = re.sub(r'[^\x00-\x7F]+', '[UNICODE]', cleaned_content)
+                        
+                        # Write cleaned content back to temp file with UTF-8 encoding
+                        with open(temp_path, 'w', encoding='utf-8') as f:
+                            f.write(cleaned_content)
+                        
+                        # Verify the cleaning worked
+                        with open(temp_path, 'r', encoding='utf-8') as f:
+                            verify_content = f.read()
+                            if any(ord(char) > 127 for char in verify_content):
+                                print("Warning: Unicode characters still present after cleaning")
+                            else:
+                                print("Success: All Unicode characters cleaned from file")
+                            
+                    except Exception as e:
+                        return jsonify({'success': False, 'error': f'Error cleaning file content: {str(e)}'})
                     
-            except Exception as e:
-                return jsonify({'success': False, 'error': f'Error cleaning file content: {str(e)}'})
-            
-            # Parse contract
-            contract_ast = parser.parse_file(temp_path)
-            if not contract_ast:
-                return jsonify({'success': False, 'error': 'Failed to parse contract'})
+                    # Parse contract
+                    contract_ast = parser.parse_file(temp_path)
+                    if not contract_ast:
+                        return jsonify({'success': False, 'error': 'Failed to parse contract'})
+                    
+                    # Cache the result (only for uploaded files)
+                    if 'test_contract' not in request.form and temp_path:
+                        ast_cache.set(temp_path, contract_ast)
+                
+                perf_monitor.end("parsing")
+                
+                # Initialize Solidity detectors
+                detectors = []
+                if 'overflow' in selected_detectors:
+                    detectors.append(OverflowDetector())
+                if 'access_control' in selected_detectors:
+                    detectors.append(AccessControlDetector())
+                if 'reentrancy' in selected_detectors:
+                    detectors.append(ReentrancyDetector())
+                if 'time_manipulation' in selected_detectors:
+                    detectors.append(TimeManipulationDetector())
+                if 'denial_of_service' in selected_detectors:
+                    detectors.append(DenialOfServiceDetector())
+                if 'unprotected_selfdestruct' in selected_detectors:
+                    detectors.append(UnprotectedSelfDestructDetector())
             
             # Additional cleaning of parsed content
             if 'content' in contract_ast:
                 contract_ast['content'] = clean_unicode_data(contract_ast['content'])
             
-            # Run detectors with Unicode-safe wrapper
-            all_vulnerabilities = []
-            detector_results = {}
+            # Run detectors in parallel for better performance
+            perf_monitor.start("detection")
+            all_vulnerabilities = parallel_detect(detectors, contract_ast)
+            perf_monitor.end("detection")
             
-            for detector in detectors:
-                detector_name = detector.__class__.__name__
-                try:
-                    print(f"Running {detector_name}...")
-                    vulnerabilities = detector.detect(contract_ast)
-                    print(f"{detector_name} completed, found {len(vulnerabilities)} vulnerabilities")
-                    
-                    # Clean Unicode characters in vulnerability data immediately
-                    cleaned_vulnerabilities = clean_unicode_data(vulnerabilities)
-                    all_vulnerabilities.extend(cleaned_vulnerabilities)
-                    detector_results[detector_name] = len(cleaned_vulnerabilities)
-                    print(f"{detector_name} cleaned, {len(cleaned_vulnerabilities)} vulnerabilities")
-                    
-                except (UnicodeEncodeError, UnicodeDecodeError) as e:
-                    # If detector fails due to Unicode, skip it and continue
-                    print(f"Unicode error in {detector_name}: {e}")
-                    detector_results[detector_name] = 0
-                    continue
-                except Exception as e:
-                    # Other errors
-                    print(f"Error in {detector_name}: {e}")
-                    detector_results[detector_name] = 0
-                    continue
+            # Calculate detector results for summary
+            detector_results = {}
+            for vuln in all_vulnerabilities:
+                detector_name = vuln.get('detector', 'Unknown')
+                detector_results[detector_name] = detector_results.get(detector_name, 0) + 1
+            
+            # Advanced analysis modules (Fuzzing and Optimization)
+            # Note: Fuzzing only works with Solidity files, Optimization only with bytecode
+            advanced_results = {}
+            
+            # Bytecode Optimization Analysis
+            if enable_optimization:
+                if is_bytecode:
+                    try:
+                        from optimization.optimizer import BytecodeOptimizer
+                        print("Starting optimization analysis...")
+                        perf_monitor.start("optimization")
+                        optimizer = BytecodeOptimizer()
+                        optimization_results = optimizer.detect(contract_ast.get('opcodes', []), contract_ast)
+                        
+                        # Analyze gas usage
+                        gas_analysis = optimizer.analyze_gas_usage(contract_ast.get('opcodes', []))
+                        savings = optimizer.calculate_potential_savings(optimization_results)
+                        
+                        advanced_results['optimization'] = {
+                            'optimizations': optimization_results,
+                            'gas_analysis': gas_analysis,
+                            'potential_savings': savings
+                        }
+                        perf_monitor.end("optimization")
+                        print(f"Optimization analysis completed: {len(optimization_results)} opportunities found")
+                    except ImportError as e:
+                        error_msg = f"Warning: Optimization module not available: {e}"
+                        print(error_msg)
+                        advanced_results['optimization'] = {
+                            'error': error_msg,
+                            'metrics': {'optimizations_found': 0, 'total_savings': 0}
+                        }
+                    except Exception as e:
+                        error_msg = f"Error in optimization: {e}"
+                        print(error_msg)
+                        import traceback
+                        traceback.print_exc()
+                        advanced_results['optimization'] = {
+                            'error': error_msg,
+                            'metrics': {'optimizations_found': 0, 'total_savings': 0}
+                        }
+                else:
+                    print("Note: Optimization analysis is only available for bytecode files")
+                    advanced_results['optimization'] = {
+                        'error': 'Optimization analysis is only available for bytecode files, not Solidity',
+                        'metrics': {'optimizations_found': 0, 'total_savings': 0}
+                    }
+            
+            if enable_fuzzing:
+                if is_bytecode:
+                    print("Note: Fuzzing is only available for Solidity files, not bytecode")
+                    advanced_results['fuzzing'] = {
+                        'error': 'Fuzzing only works with Solidity files, not bytecode',
+                        'metrics': {'functions_tested': 0, 'iterations': 0, 'vulnerabilities_found': 0}
+                    }
+                else:
+                    try:
+                        from analysis.fuzzer import Fuzzer
+                        print("Starting fuzzing analysis...")
+                        perf_monitor.start("fuzzing")
+                        fuzzer = Fuzzer()
+                        fuzzer.enable()
+                        print(f"Fuzzer enabled, analyzing contract...")
+                        fuzzing_results = fuzzer.analyze(contract_ast)
+                        perf_monitor.end("fuzzing")
+                        advanced_results['fuzzing'] = fuzzing_results
+                        
+                        # Extract vulnerabilities from fuzzing results
+                        fuzzing_vulns = fuzzing_results.get('vulnerabilities', [])
+                        if fuzzing_vulns:
+                            print(f"Fuzzing found {len(fuzzing_vulns)} vulnerabilities")
+                            all_vulnerabilities.extend(fuzzing_vulns)
+                        else:
+                            print("Fuzzing found no vulnerabilities")
+                        
+                        print(f"Fuzzing analysis completed. Metrics: {fuzzing_results.get('metrics', {})}")
+                    except ImportError as e:
+                        error_msg = f"Warning: Fuzzing module not available: {e}"
+                        print(error_msg)
+                        advanced_results['fuzzing'] = {
+                            'error': error_msg,
+                            'metrics': {'functions_tested': 0, 'iterations': 0, 'vulnerabilities_found': 0}
+                        }
+                    except Exception as e:
+                        error_msg = f"Error in fuzzing: {e}"
+                        print(error_msg)
+                        import traceback
+                        traceback.print_exc()
+                        advanced_results['fuzzing'] = {
+                            'error': error_msg,
+                            'metrics': {'functions_tested': 0, 'iterations': 0, 'vulnerabilities_found': 0}
+                        }
+            
+            # Add performance metrics
+            perf_monitor.end("total_analysis")
+            performance_metrics = perf_monitor.get_metrics()
             
             # Prepare results
             print("Preparing results...")
@@ -845,8 +1177,13 @@ def analyze():
                 'contract_file': clean_unicode_data(contract_filename),
                 'total_vulnerabilities': len(all_vulnerabilities),
                 'detector_results': clean_unicode_data(detector_results),
+                'performance': performance_metrics,
                 'vulnerabilities': all_vulnerabilities
             }
+            
+            # Add advanced analysis results if available
+            if advanced_results:
+                results['advanced_analysis'] = advanced_results
             print(f"Results prepared: {len(all_vulnerabilities)} total vulnerabilities")
             
             # Store results for download
@@ -899,6 +1236,160 @@ def analyze():
         except:
             error_msg = "An error occurred during analysis"
         return jsonify({'success': False, 'error': error_msg})
+
+
+# ============================================================================
+# Remix IDE API Endpoints
+# ============================================================================
+
+@app.route('/api/health', methods=['GET'])
+def remix_health_check():
+    """Health check endpoint for Remix IDE."""
+    return jsonify({
+        'status': 'healthy',
+        'service': 'Smart Contract Vulnerability Detector API',
+        'version': '1.0.0'
+    })
+
+
+@app.route('/api/analyze', methods=['POST'])
+def remix_analyze():
+    """
+    Analyze contract for Remix IDE.
+    
+    Request body:
+    {
+        "code": "contract code here",
+        "fileType": "solidity" | "bytecode",
+        "detectors": ["overflow", "reentrancy", ...]  # optional
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'success': False, 'error': 'No data provided'}), 400
+        
+        code = data.get('code', '')
+        file_type = data.get('fileType', 'solidity').lower()
+        selected_detectors = data.get('detectors', [])
+        
+        if not code:
+            return jsonify({'success': False, 'error': 'No contract code provided'}), 400
+        
+        # Create a temporary file with the code
+        is_bytecode = file_type == 'bytecode' or file_type == 'bin'
+        suffix = '.bin' if is_bytecode else '.sol'
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix=suffix, delete=False) as temp_file:
+            temp_file.write(code)
+            temp_path = temp_file.name
+        
+        try:
+            perf_monitor = PerformanceMonitor()
+            perf_monitor.start("total_analysis")
+            
+            if is_bytecode:
+                parser = BytecodeParser()
+                bytecode_hex = code.replace('0x', '').replace(' ', '').replace('\n', '').strip()
+                contract_ast = parser.parse_bytecode(bytecode_hex)
+                
+                all_detectors = [
+                    BytecodeOverflowDetector(),
+                    BytecodeAccessControlDetector(),
+                    BytecodeReentrancyDetector(),
+                    BytecodeTimeManipulationDetector(),
+                    BytecodeDenialOfServiceDetector(),
+                    BytecodeUnprotectedSelfDestructDetector()
+                ]
+            else:
+                parser = SolidityParser()
+                contract_ast = parser.parse_file(temp_path)
+                
+                all_detectors = [
+                    OverflowDetector(),
+                    AccessControlDetector(),
+                    ReentrancyDetector(),
+                    TimeManipulationDetector(),
+                    DenialOfServiceDetector(),
+                    UnprotectedSelfDestructDetector()
+                ]
+            
+            if not contract_ast:
+                return jsonify({'success': False, 'error': 'Failed to parse contract'}), 400
+            
+            # Filter detectors if specified
+            if selected_detectors:
+                detector_map = {
+                    'overflow': (OverflowDetector, BytecodeOverflowDetector),
+                    'access_control': (AccessControlDetector, BytecodeAccessControlDetector),
+                    'reentrancy': (ReentrancyDetector, BytecodeReentrancyDetector),
+                    'time_manipulation': (TimeManipulationDetector, BytecodeTimeManipulationDetector),
+                    'denial_of_service': (DenialOfServiceDetector, BytecodeDenialOfServiceDetector),
+                    'unprotected_selfdestruct': (UnprotectedSelfDestructDetector, BytecodeUnprotectedSelfDestructDetector)
+                }
+                
+                detectors = []
+                for det_name in selected_detectors:
+                    if det_name in detector_map:
+                        det_class = detector_map[det_name][1] if is_bytecode else detector_map[det_name][0]
+                        detectors.append(det_class())
+            else:
+                detectors = all_detectors
+            
+            # Run detectors in parallel
+            perf_monitor.start("detection")
+            all_vulnerabilities = parallel_detect(detectors, contract_ast)
+            perf_monitor.end("detection")
+            perf_monitor.end("total_analysis")
+            
+            # Format response for Remix
+            response = {
+                'success': True,
+                'vulnerabilities': all_vulnerabilities,
+                'summary': {
+                    'total': len(all_vulnerabilities),
+                    'by_severity': {
+                        'Critical': sum(1 for v in all_vulnerabilities if v.get('severity') == 'Critical'),
+                        'High': sum(1 for v in all_vulnerabilities if v.get('severity') == 'High'),
+                        'Medium': sum(1 for v in all_vulnerabilities if v.get('severity') == 'Medium'),
+                        'Low': sum(1 for v in all_vulnerabilities if v.get('severity') == 'Low')
+                    },
+                    'by_type': {}
+                },
+                'performance': perf_monitor.get_metrics()
+            }
+            
+            # Group by type
+            for vuln in all_vulnerabilities:
+                vuln_type = vuln.get('type', 'Unknown')
+                response['summary']['by_type'][vuln_type] = response['summary']['by_type'].get(vuln_type, 0) + 1
+            
+            return jsonify(response)
+        
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/detectors', methods=['GET'])
+def remix_list_detectors():
+    """List all available detectors for Remix IDE."""
+    return jsonify({
+        'success': True,
+        'detectors': [
+            {'id': 'overflow', 'name': 'Integer Overflow/Underflow', 'description': 'Detects unsafe arithmetic operations'},
+            {'id': 'access_control', 'name': 'Access Control Issues', 'description': 'Finds missing access modifiers'},
+            {'id': 'reentrancy', 'name': 'Reentrancy Vulnerabilities', 'description': 'Identifies reentrancy attack vectors'},
+            {'id': 'time_manipulation', 'name': 'Time Manipulation', 'description': 'Detects time-based vulnerabilities'},
+            {'id': 'denial_of_service', 'name': 'Denial of Service', 'description': 'Identifies DoS vulnerabilities'},
+            {'id': 'unprotected_selfdestruct', 'name': 'Unprotected Selfdestruct', 'description': 'Detects unprotected selfdestruct calls'}
+        ]
+    })
+
 
 @app.route('/download')
 def download():
@@ -994,8 +1485,10 @@ if __name__ == '__main__':
     
     if not debug_mode:
         print("📍 Production mode - Ready to analyze smart contracts!")
+        print("📡 Remix API available at: http://localhost:{}/api/analyze".format(port))
     else:
         print(f"📍 Development mode - Open your browser and go to: http://localhost:{port}")
         print("🔍 Ready to analyze smart contracts!")
+        print("📡 Remix API available at: http://localhost:{}/api/analyze".format(port))
     
     app.run(debug=debug_mode, host='0.0.0.0', port=port)
