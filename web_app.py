@@ -161,7 +161,7 @@ def ensure_ascii_safe(data):
         return data
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for Remix IDE integration
+CORS(app)
 
 # Initialize performance cache
 ast_cache = ASTCache()
@@ -221,36 +221,65 @@ HTML_TEMPLATE = """
         }
         
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             padding: 20px;
         }
         
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
             background: white;
-            border-radius: 15px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            border-radius: 20px;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.15);
             overflow: hidden;
+            animation: fadeIn 0.5s ease-in;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
         }
         
         .header {
-            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            padding: 30px;
+            padding: 40px 30px;
             text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+            animation: pulse 4s ease-in-out infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 0.5; }
+            50% { transform: scale(1.1); opacity: 0.8; }
         }
         
         .header h1 {
-            font-size: 2.5em;
+            font-size: 2.8em;
             margin-bottom: 10px;
+            position: relative;
+            z-index: 1;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
         }
         
         .header p {
-            opacity: 0.9;
-            font-size: 1.1em;
+            opacity: 0.95;
+            font-size: 1.2em;
+            position: relative;
+            z-index: 1;
         }
         
         .main-content {
@@ -258,23 +287,27 @@ HTML_TEMPLATE = """
         }
         
         .upload-section {
-            background: #f8f9fa;
-            border-radius: 10px;
-            padding: 30px;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 15px;
+            padding: 35px;
             margin-bottom: 30px;
-            border: 2px dashed #dee2e6;
+            border: 3px dashed #dee2e6;
             text-align: center;
+            transition: all 0.3s ease;
+            position: relative;
         }
         
         .upload-section.dragover {
-            border-color: #007bff;
-            background: #e3f2fd;
+            border-color: #667eea;
+            background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+            transform: scale(1.02);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
         }
         
         .file-input-wrapper {
             position: relative;
             display: inline-block;
-            margin: 20px 0;
+            margin: 25px 0;
         }
         
         .file-input {
@@ -286,108 +319,274 @@ HTML_TEMPLATE = """
         }
         
         .file-input-button {
-            background: #007bff;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            padding: 12px 30px;
-            border-radius: 25px;
+            padding: 14px 35px;
+            border-radius: 30px;
             border: none;
             cursor: pointer;
             font-size: 16px;
+            font-weight: 600;
             transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
         }
         
         .file-input-button:hover {
-            background: #0056b3;
-            transform: translateY(-2px);
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+        }
+        
+        .file-input-button:active {
+            transform: translateY(-1px);
+        }
+        
+        .selected-file-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 25px;
+            margin-top: 15px;
+            font-weight: 600;
+            box-shadow: 0 4px 15px rgba(40, 167, 69, 0.3);
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
         }
         
         .quick-select {
-            margin: 20px 0;
+            margin: 25px 0;
+            background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
         }
         
         .quick-select h3 {
             margin-bottom: 15px;
             color: #2c3e50;
+            font-size: 1.5em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .search-box {
+            width: 100%;
+            padding: 12px 20px;
+            border: 2px solid #dee2e6;
+            border-radius: 25px;
+            font-size: 14px;
+            margin-bottom: 15px;
+            transition: all 0.3s;
+            background: white;
+        }
+        
+        .search-box:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .file-list-container {
+            background: white;
+            border-radius: 10px;
+            border: 1px solid #e9ecef;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+        
+        .file-list-header {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            padding: 12px 15px;
+            font-weight: 600;
+            color: #495057;
+            border-bottom: 2px solid #dee2e6;
+        }
+        
+        .file-list {
+            max-height: 400px;
+            overflow-y: auto;
+            padding: 10px;
+        }
+        
+        .file-list::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .file-list::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        
+        .file-list::-webkit-scrollbar-thumb {
+            background: #667eea;
+            border-radius: 10px;
+        }
+        
+        .file-list::-webkit-scrollbar-thumb:hover {
+            background: #764ba2;
         }
         
         .test-contract-btn {
-            background: #6c757d;
+            background: linear-gradient(135deg, #6c757d 0%, #5a6268 100%);
             color: white;
             border: none;
-            padding: 8px 16px;
-            margin: 5px;
-            border-radius: 20px;
+            padding: 10px 18px;
+            margin: 6px 0;
+            border-radius: 8px;
             cursor: pointer;
             transition: all 0.3s;
+            width: 100%;
+            text-align: left;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
         
         .test-contract-btn:hover {
-            background: #5a6268;
-            transform: translateY(-1px);
+            background: linear-gradient(135deg, #5a6268 0%, #495057 100%);
+            transform: translateX(5px);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+        }
+        
+        .test-contract-btn:active {
+            transform: translateX(2px);
+        }
+        
+        .test-contract-btn.sol-file {
+            background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+        }
+        
+        .test-contract-btn.sol-file:hover {
+            background: linear-gradient(135deg, #0056b3 0%, #004085 100%);
+        }
+        
+        .test-contract-btn.bin-file {
+            background: linear-gradient(135deg, #6c757d 0%, #5a6268 100%);
+        }
+        
+        .test-contract-btn.bin-file:hover {
+            background: linear-gradient(135deg, #5a6268 0%, #495057 100%);
         }
         
         .options-section {
-            background: #f8f9fa;
-            border-radius: 10px;
-            padding: 25px;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 15px;
+            padding: 30px;
             margin-bottom: 30px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+        }
+        
+        .options-section h3 {
+            color: #2c3e50;
+            font-size: 1.5em;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
         
         .detector-options {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 15px;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
             margin: 20px 0;
         }
         
         .detector-option {
             background: white;
-            padding: 15px;
-            border-radius: 8px;
-            border-left: 4px solid #007bff;
+            padding: 20px;
+            border-radius: 12px;
+            border-left: 5px solid #667eea;
+            transition: all 0.3s;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        
+        .detector-option:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.12);
         }
         
         .detector-option input[type="checkbox"] {
-            margin-right: 10px;
-            transform: scale(1.2);
+            margin-right: 12px;
+            transform: scale(1.3);
+            cursor: pointer;
+        }
+        
+        .detector-option label {
+            cursor: pointer;
+            display: flex;
+            align-items: flex-start;
         }
         
         .analyze-btn {
             background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
             color: white;
             border: none;
-            padding: 15px 40px;
+            padding: 18px 50px;
             font-size: 18px;
-            border-radius: 30px;
+            font-weight: 600;
+            border-radius: 35px;
             cursor: pointer;
             transition: all 0.3s;
             display: block;
-            margin: 30px auto;
+            margin: 35px auto;
+            box-shadow: 0 6px 20px rgba(40, 167, 69, 0.4);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .analyze-btn::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.3);
+            transform: translate(-50%, -50%);
+            transition: width 0.6s, height 0.6s;
+        }
+        
+        .analyze-btn:hover::before {
+            width: 300px;
+            height: 300px;
         }
         
         .analyze-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(40, 167, 69, 0.3);
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(40, 167, 69, 0.5);
         }
         
         .analyze-btn:disabled {
             background: #6c757d;
             cursor: not-allowed;
             transform: none;
+            box-shadow: none;
         }
         
         .loading {
             text-align: center;
-            padding: 40px;
+            padding: 50px;
             display: none;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 15px;
+            margin: 30px 0;
         }
         
         .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #007bff;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #667eea;
             border-radius: 50%;
-            width: 50px;
-            height: 50px;
+            width: 60px;
+            height: 60px;
             animation: spin 1s linear infinite;
             margin: 0 auto 20px;
         }
@@ -397,46 +596,218 @@ HTML_TEMPLATE = """
             100% { transform: rotate(360deg); }
         }
         
+        .loading-text {
+            font-size: 16px;
+            color: #495057;
+            font-weight: 500;
+        }
+        
         .results-section {
             margin-top: 30px;
             display: none;
+            animation: slideUp 0.5s ease-out;
+        }
+        
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
         }
         
         .results-header {
-            background: #2c3e50;
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
             color: white;
-            padding: 20px;
-            border-radius: 10px 10px 0 0;
+            padding: 25px;
+            border-radius: 15px 15px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        
+        .results-header h3 {
+            margin: 0;
+            font-size: 1.5em;
         }
         
         .results-content {
             background: #1e1e1e;
             color: #f8f9fa;
-            padding: 20px;
+            padding: 25px;
             font-family: 'Courier New', monospace;
             white-space: pre-wrap;
-            max-height: 500px;
+            max-height: 600px;
             overflow-y: auto;
-            border-radius: 0 0 10px 10px;
+            border-radius: 0 0 15px 15px;
+            line-height: 1.6;
         }
         
-        .vulnerability-high { color: #dc3545; }
-        .vulnerability-medium { color: #ffc107; }
-        .vulnerability-low { color: #17a2b8; }
-        .success-text { color: #28a745; }
+        .results-content::-webkit-scrollbar {
+            width: 10px;
+        }
+        
+        .results-content::-webkit-scrollbar-track {
+            background: #2c2c2c;
+        }
+        
+        .results-content::-webkit-scrollbar-thumb {
+            background: #667eea;
+            border-radius: 10px;
+        }
+        
+        .vulnerability-high { color: #ff6b6b; font-weight: bold; }
+        .vulnerability-medium { color: #ffd93d; font-weight: bold; }
+        .vulnerability-low { color: #4ecdc4; }
+        .success-text { color: #51cf66; font-weight: bold; }
         
         .download-btn {
-            background: #17a2b8;
+            background: linear-gradient(135deg, #17a2b8 0%, #138496 100%);
             color: white;
             border: none;
-            padding: 10px 20px;
-            border-radius: 5px;
+            padding: 12px 25px;
+            border-radius: 8px;
             cursor: pointer;
-            margin: 10px 5px;
+            margin: 5px;
+            font-weight: 600;
+            transition: all 0.3s;
+            box-shadow: 0 3px 10px rgba(23, 162, 184, 0.3);
         }
         
         .download-btn:hover {
-            background: #138496;
+            background: linear-gradient(135deg, #138496 0%, #117a8b 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(23, 162, 184, 0.4);
+        }
+        
+        .stats-grid {
+            display: flex;
+            flex-wrap: nowrap;
+            gap: 10px;
+            margin: 20px 0;
+            overflow-x: auto;
+            padding-bottom: 5px;
+        }
+        
+        .stats-grid::-webkit-scrollbar {
+            height: 6px;
+        }
+        
+        .stats-grid::-webkit-scrollbar-track {
+            background: #2c2c2c;
+            border-radius: 10px;
+        }
+        
+        .stats-grid::-webkit-scrollbar-thumb {
+            background: #667eea;
+            border-radius: 10px;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 12px 16px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: all 0.3s;
+            min-width: 120px;
+            flex-shrink: 0;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+        }
+        
+        .stat-value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #667eea;
+            margin: 5px 0;
+            line-height: 1.2;
+        }
+        
+        .stat-label {
+            color: #6c757d;
+            font-size: 0.75em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            line-height: 1.3;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #6c757d;
+        }
+        
+        .empty-state-icon {
+            font-size: 4em;
+            margin-bottom: 15px;
+            opacity: 0.5;
+        }
+        
+        .filter-chip {
+            background: white;
+            border: 2px solid #dee2e6;
+            color: #495057;
+            padding: 8px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+            white-space: nowrap;
+        }
+        
+        .filter-chip:hover {
+            border-color: #667eea;
+            color: #667eea;
+            transform: translateY(-2px);
+            box-shadow: 0 3px 10px rgba(102, 126, 234, 0.2);
+        }
+        
+        .filter-chip.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-color: #667eea;
+            color: white;
+            box-shadow: 0 3px 10px rgba(102, 126, 234, 0.3);
+        }
+        
+        .filter-chip.active:hover {
+            background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        @media (max-width: 768px) {
+            .main-content {
+                padding: 20px;
+            }
+            
+            .header h1 {
+                font-size: 2em;
+            }
+            
+            .detector-options {
+                grid-template-columns: 1fr;
+            }
+            
+            .stats-grid {
+                gap: 8px;
+            }
+            
+            .stat-card {
+                min-width: 100px;
+                padding: 10px 12px;
+            }
+            
+            .stat-value {
+                font-size: 1.5em;
+            }
+            
+            .stat-label {
+                font-size: 0.7em;
+            }
         }
     </style>
 </head>
@@ -457,23 +828,63 @@ HTML_TEMPLATE = """
                     <button class="file-input-button">Choose File</button>
                 </div>
                 
-                <div id="selectedFile" style="margin-top: 15px; font-weight: bold;"></div>
+                <div id="selectedFile"></div>
                 
                 <div class="quick-select">
-                    <h3>🚀 Quick Select Test Contracts</h3>
-                    <button class="test-contract-btn" onclick="selectTestContract('vulnerable_overflow.sol')">Overflow Vulnerable</button>
-                    <button class="test-contract-btn" onclick="selectTestContract('vulnerable_access_control.sol')">Access Control Vulnerable</button>
-                    <button class="test-contract-btn" onclick="selectTestContract('vulnerable_reentrancy.sol')">Reentrancy Vulnerable</button>
-                    <button class="test-contract-btn" onclick="selectTestContract('vulnerable_time_manipulation.sol')">Time Manipulation Vulnerable</button>
-                    <button class="test-contract-btn" onclick="selectTestContract('vulnerable_denial_of_service.sol')">DoS Vulnerable</button>
-                    <button class="test-contract-btn" onclick="selectTestContract('vulnerable_unprotected_selfdestruct.sol')">Selfdestruct Vulnerable</button>
-                    <h4 style="margin-top: 15px; margin-bottom: 10px;">📦 Bytecode Test Contracts</h4>
-                    <button class="test-contract-btn" onclick="selectTestContract('test_reentrancy_only.bin')">Bytecode Reentrancy</button>
-                    <button class="test-contract-btn" onclick="selectTestContract('test_overflow_only.bin')">Bytecode Overflow</button>
-                    <button class="test-contract-btn" onclick="selectTestContract('test_access_control_only.bin')">Bytecode Access Control</button>
-                    <button class="test-contract-btn" onclick="selectTestContract('test_time_manipulation_only.bin')">Bytecode Time Manipulation</button>
-                    <button class="test-contract-btn" onclick="selectTestContract('test_unprotected_selfdestruct_only.bin')">Bytecode Selfdestruct</button>
-                    <button class="test-contract-btn" onclick="selectTestContract('test_denial_of_service_only.bin')">Bytecode DoS</button>
+                    <h3>📂 Available Test Contracts</h3>
+                    <p style="margin-bottom: 20px; color: #495057; font-size: 0.95em;">Select a test contract from the list below or use filters to narrow down</p>
+                    
+                    <input type="text" id="fileSearch" class="search-box" placeholder="🔍 Search contracts by name..." onkeyup="filterFiles()">
+                    
+                    <div style="margin-top: 20px; margin-bottom: 20px;">
+                        <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 15px;">
+                            <span style="font-weight: 600; color: #495057; margin-right: 5px;">Filter by:</span>
+                            <button class="filter-chip active" data-filter="all" onclick="setFilter('all')">All</button>
+                            <button class="filter-chip" data-filter="overflow" onclick="setFilter('overflow')">Overflow</button>
+                            <button class="filter-chip" data-filter="reentrancy" onclick="setFilter('reentrancy')">Reentrancy</button>
+                            <button class="filter-chip" data-filter="time_manipulation" onclick="setFilter('time_manipulation')">Time Manipulation</button>
+                            <button class="filter-chip" data-filter="denial_of_service" onclick="setFilter('denial_of_service')">DoS</button>
+                            <button class="filter-chip" data-filter="access_control" onclick="setFilter('access_control')">Access Control</button>
+                            <button class="filter-chip" data-filter="selfdestruct" onclick="setFilter('selfdestruct')">Selfdestruct</button>
+                        </div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+                            <span style="font-weight: 600; color: #495057; margin-right: 5px;">Level:</span>
+                            <button class="filter-chip active" data-level="all" onclick="setLevelFilter('all')">All Levels</button>
+                            <button class="filter-chip" data-level="level1" onclick="setLevelFilter('level1')">Level 1</button>
+                            <button class="filter-chip" data-level="level2" onclick="setLevelFilter('level2')">Level 2</button>
+                            <button class="filter-chip" data-level="level3" onclick="setLevelFilter('level3')">Level 3</button>
+                            <button class="filter-chip" data-level="mixed" onclick="setLevelFilter('mixed')">Mixed</button>
+                        </div>
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 15px;">
+                        <div>
+                            <div class="file-list-container">
+                                <div class="file-list-header">
+                                    📄 Solidity Files (.sol) - <span id="solCount">0</span> files
+                                </div>
+                                <div id="solidityFiles" class="file-list">
+                                    <div class="empty-state">
+                                        <div class="empty-state-icon">⏳</div>
+                                        <p>Loading files...</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="file-list-container">
+                                <div class="file-list-header">
+                                    📦 Bytecode Files (.bin) - <span id="binCount">0</span> files
+                                </div>
+                                <div id="bytecodeFiles" class="file-list">
+                                    <div class="empty-state">
+                                        <div class="empty-state-icon">⏳</div>
+                                        <p>Loading files...</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
             
@@ -523,24 +934,6 @@ HTML_TEMPLATE = """
                         </label>
                     </div>
                 </div>
-                
-                <h3 style="margin-top: 20px; margin-bottom: 10px;">🧪 Advanced Analysis</h3>
-                <div class="detector-options">
-                    <div class="detector-option">
-                        <input type="checkbox" id="enable_fuzzing">
-                        <label for="enable_fuzzing">
-                            <strong>Fuzzing (Dynamic Analysis)</strong><br>
-                            <small>Generate test inputs and detect input-dependent vulnerabilities</small>
-                        </label>
-                    </div>
-                    <div class="detector-option">
-                        <input type="checkbox" id="enable_optimization">
-                        <label for="enable_optimization">
-                            <strong>Bytecode Optimization</strong><br>
-                            <small>Detect gas optimization opportunities (bytecode files only)</small>
-                        </label>
-                    </div>
-                </div>
             </div>
             
             <button class="analyze-btn" id="analyzeBtn" onclick="startAnalysis()">
@@ -549,7 +942,8 @@ HTML_TEMPLATE = """
             
             <div class="loading" id="loading">
                 <div class="spinner"></div>
-                <p>Analyzing contract... Please wait</p>
+                <p class="loading-text">Analyzing contract... Please wait</p>
+                <p style="color: #6c757d; font-size: 0.9em; margin-top: 10px;">This may take a few moments depending on contract size</p>
             </div>
             
             <div class="results-section" id="resultsSection">
@@ -571,9 +965,130 @@ HTML_TEMPLATE = """
         document.getElementById('fileInput').addEventListener('change', function(e) {
             if (e.target.files.length > 0) {
                 currentFile = e.target.files[0];
-                document.getElementById('selectedFile').textContent = `Selected: ${currentFile.name}`;
+                showSelectedFile(currentFile.name);
             }
         });
+        
+        function showSelectedFile(filename) {
+            const selectedDiv = document.getElementById('selectedFile');
+            selectedDiv.innerHTML = `<div class="selected-file-badge">✓ Selected: ${filename}</div>`;
+        }
+        
+        let currentFilter = 'all';
+        let currentLevelFilter = 'all';
+        
+        function setFilter(filterType) {
+            currentFilter = filterType;
+            // Update active state
+            document.querySelectorAll('[data-filter]').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.querySelector(`[data-filter="${filterType}"]`).classList.add('active');
+            applyFilters();
+        }
+        
+        function setLevelFilter(level) {
+            currentLevelFilter = level;
+            // Update active state
+            document.querySelectorAll('[data-level]').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.querySelector(`[data-level="${level}"]`).classList.add('active');
+            applyFilters();
+        }
+        
+        function matchesFilter(filename) {
+            const lowerFilename = filename.toLowerCase();
+            
+            // Check vulnerability type filter
+            if (currentFilter !== 'all') {
+                const filterMap = {
+                    'overflow': ['overflow'],
+                    'reentrancy': ['reentrancy'],
+                    'time_manipulation': ['time', 'time_manipulation'],
+                    'denial_of_service': ['dos', 'denial', 'denial_of_service'],
+                    'access_control': ['access', 'access_control'],
+                    'selfdestruct': ['selfdestruct', 'selfdestruct']
+                };
+                
+                const keywords = filterMap[currentFilter];
+                if (!keywords || !keywords.some(keyword => lowerFilename.includes(keyword))) {
+                    return false;
+                }
+            }
+            
+            // Check level filter
+            if (currentLevelFilter !== 'all') {
+                if (currentLevelFilter === 'mixed') {
+                    if (!lowerFilename.includes('mixed') && !lowerFilename.includes('vuln')) {
+                        return false;
+                    }
+                } else {
+                    // level1, level2, level3
+                    if (!lowerFilename.includes(currentLevelFilter)) {
+                        return false;
+                    }
+                }
+            }
+            
+            return true;
+        }
+        
+        function filterFiles() {
+            applyFilters();
+        }
+        
+        function applyFilters() {
+            const searchTerm = document.getElementById('fileSearch').value.toLowerCase();
+            const solidityButtons = document.querySelectorAll('#solidityFiles .test-contract-btn');
+            const bytecodeButtons = document.querySelectorAll('#bytecodeFiles .test-contract-btn');
+            
+            let solVisible = 0, binVisible = 0;
+            
+            solidityButtons.forEach(btn => {
+                const filename = btn.textContent.toLowerCase().replace('📄', '').trim();
+                const matchesSearch = filename.includes(searchTerm);
+                const matchesFilterType = matchesFilter(filename);
+                
+                if (matchesSearch && matchesFilterType) {
+                    btn.style.display = 'flex';
+                    solVisible++;
+                } else {
+                    btn.style.display = 'none';
+                }
+            });
+            
+            bytecodeButtons.forEach(btn => {
+                const filename = btn.textContent.toLowerCase().replace('📦', '').trim();
+                const matchesSearch = filename.includes(searchTerm);
+                const matchesFilterType = matchesFilter(filename);
+                
+                if (matchesSearch && matchesFilterType) {
+                    btn.style.display = 'flex';
+                    binVisible++;
+                } else {
+                    btn.style.display = 'none';
+                }
+            });
+            
+            // Update counts
+            document.getElementById('solCount').textContent = solVisible;
+            document.getElementById('binCount').textContent = binVisible;
+            
+            // Show empty state if no files match
+            if (solVisible === 0) {
+                const solidityDiv = document.getElementById('solidityFiles');
+                if (!solidityDiv.querySelector('.empty-state')) {
+                    solidityDiv.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🔍</div><p>No files match the current filters</p></div>';
+                }
+            }
+            if (binVisible === 0) {
+                const bytecodeDiv = document.getElementById('bytecodeFiles');
+                if (!bytecodeDiv.querySelector('.empty-state')) {
+                    bytecodeDiv.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🔍</div><p>No files match the current filters</p></div>';
+                }
+            }
+        }
         
         // Drag and drop handling
         const uploadSection = document.getElementById('uploadSection');
@@ -594,15 +1109,76 @@ HTML_TEMPLATE = """
             
             if (e.dataTransfer.files.length > 0) {
                 currentFile = e.dataTransfer.files[0];
-                document.getElementById('selectedFile').textContent = `Selected: ${currentFile.name}`;
+                showSelectedFile(currentFile.name);
                 document.getElementById('fileInput').files = e.dataTransfer.files;
             }
         });
         
         function selectTestContract(filename) {
-            document.getElementById('selectedFile').textContent = `Selected: ${filename}`;
+            showSelectedFile(filename);
             currentFile = { name: filename, isTestContract: true };
         }
+        
+        // Load available test contracts
+        async function loadTestContracts() {
+            try {
+                const response = await fetch('/list_contracts');
+                const data = await response.json();
+                
+                if (data.success) {
+                    const solidityDiv = document.getElementById('solidityFiles');
+                    const bytecodeDiv = document.getElementById('bytecodeFiles');
+                    
+                    // Store original file lists for filtering
+                    window.allSolidityFiles = data.solidity_files || [];
+                    window.allBytecodeFiles = data.bytecode_files || [];
+                    
+                    // Display Solidity files
+                    if (data.solidity_files && data.solidity_files.length > 0) {
+                        solidityDiv.innerHTML = '';
+                        data.solidity_files.forEach(filename => {
+                            const button = document.createElement('button');
+                            button.className = 'test-contract-btn sol-file';
+                            button.innerHTML = `<span>📄</span> <span>${filename}</span>`;
+                            button.onclick = () => selectTestContract(filename);
+                            solidityDiv.appendChild(button);
+                        });
+                        applyFilters(); // Apply initial filters
+                    } else {
+                        solidityDiv.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📄</div><p>No Solidity files found</p></div>';
+                        document.getElementById('solCount').textContent = '0';
+                    }
+                    
+                    // Display Bytecode files
+                    if (data.bytecode_files && data.bytecode_files.length > 0) {
+                        bytecodeDiv.innerHTML = '';
+                        data.bytecode_files.forEach(filename => {
+                            const button = document.createElement('button');
+                            button.className = 'test-contract-btn bin-file';
+                            button.innerHTML = `<span>📦</span> <span>${filename}</span>`;
+                            button.onclick = () => selectTestContract(filename);
+                            bytecodeDiv.appendChild(button);
+                        });
+                        applyFilters(); // Apply initial filters
+                    } else {
+                        bytecodeDiv.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📦</div><p>No Bytecode files found</p></div>';
+                        document.getElementById('binCount').textContent = '0';
+                    }
+                } else {
+                    document.getElementById('solidityFiles').innerHTML = '<div class="empty-state"><div class="empty-state-icon">❌</div><p style="color: #dc3545;">Error loading files</p></div>';
+                    document.getElementById('bytecodeFiles').innerHTML = '<div class="empty-state"><div class="empty-state-icon">❌</div><p style="color: #dc3545;">Error loading files</p></div>';
+                }
+            } catch (error) {
+                console.error('Error loading test contracts:', error);
+                document.getElementById('solidityFiles').innerHTML = '<div class="empty-state"><div class="empty-state-icon">❌</div><p style="color: #dc3545;">Error loading files</p></div>';
+                document.getElementById('bytecodeFiles').innerHTML = '<div class="empty-state"><div class="empty-state-icon">❌</div><p style="color: #dc3545;">Error loading files</p></div>';
+            }
+        }
+        
+        // Load contracts when page loads
+        window.addEventListener('DOMContentLoaded', function() {
+            loadTestContracts();
+        });
         
         async function startAnalysis() {
             if (!currentFile) {
@@ -635,9 +1211,13 @@ HTML_TEMPLATE = """
                 
                 formData.append('detectors', JSON.stringify(detectors));
                 
-                // Get advanced analysis options
-                const enable_fuzzing = document.getElementById('enable_fuzzing').checked;
-                const enable_optimization = document.getElementById('enable_optimization').checked;
+                // Auto-determine advanced analysis options based on file type
+                const filename = currentFile.name;
+                const isBytecode = filename.toLowerCase().endsWith('.bin');
+                const enable_fuzzing = !isBytecode; // Enable fuzzing for Solidity files
+                const enable_optimization = isBytecode; // Enable optimization for bytecode files
+                
+                console.log('File type:', isBytecode ? 'Bytecode' : 'Solidity');
                 console.log('Fuzzing enabled:', enable_fuzzing);
                 console.log('Optimization enabled:', enable_optimization);
                 formData.append('enable_fuzzing', enable_fuzzing ? 'true' : 'false');
@@ -669,6 +1249,17 @@ HTML_TEMPLATE = """
             const content = document.getElementById('resultsContent');
             const section = document.getElementById('resultsSection');
             
+            // Create summary stats HTML
+            let statsHTML = '<div class="stats-grid" style="margin-bottom: 25px;">';
+            statsHTML += `<div class="stat-card"><div class="stat-value">${results.total_vulnerabilities}</div><div class="stat-label">Total Vulnerabilities</div></div>`;
+            
+            for (const [detector, count] of Object.entries(results.detector_results)) {
+                const detectorName = detector.replace('Detector', '').replace(/([A-Z])/g, ' $1').trim();
+                statsHTML += `<div class="stat-card"><div class="stat-value">${count}</div><div class="stat-label">${detectorName}</div></div>`;
+            }
+            statsHTML += '</div>';
+            
+            // Create text output
             let output = `🔍 Analysis Results for: ${results.contract_file}\n`;
             output += `${'='.repeat(60)}\n\n`;
             
@@ -679,17 +1270,15 @@ HTML_TEMPLATE = """
                 output += `${detector}: ${count} issues\n`;
             }
             
-            // Show fuzzing metrics if available (always show if fuzzing was attempted)
+            // Show fuzzing metrics only if successfully executed (no errors)
             if (results.advanced_analysis && results.advanced_analysis.fuzzing) {
                 const fuzzing = results.advanced_analysis.fuzzing;
+                
+                // Only show if there's no error (successful execution)
+                if (!fuzzing.error) {
                 const metrics = fuzzing.metrics || {};
                 
                 output += `\n🧪 Fuzzing Analysis:\n`;
-                
-                // Show error if fuzzing failed
-                if (fuzzing.error) {
-                    output += `  ⚠️  ${fuzzing.error}\n`;
-                } else {
                     output += `  Functions tested: ${metrics.functions_tested || 0}\n`;
                     output += `  Iterations: ${metrics.iterations || 0}\n`;
                     output += `  Fuzzing vulnerabilities: ${metrics.vulnerabilities_found || 0}\n`;
@@ -705,25 +1294,20 @@ HTML_TEMPLATE = """
                         });
                     }
                 }
-            } else {
-                // Show message if fuzzing checkbox was not checked
-                output += `\n🧪 Fuzzing Analysis: Not enabled\n`;
-                output += `  (Enable "Fuzzing (Dynamic Analysis)" checkbox to use)\n`;
+                // If there's an error, don't show fuzzing section at all
             }
             
-            // Show optimization metrics if available
+            // Show optimization metrics only if successfully executed (no errors)
             if (results.advanced_analysis && results.advanced_analysis.optimization) {
                 const optimization = results.advanced_analysis.optimization;
                 
-                output += `\n🔧 Optimization Analysis:\n`;
-                
-                // Show error if optimization failed
-                if (optimization.error) {
-                    output += `  ⚠️  ${optimization.error}\n`;
-                } else {
+                // Only show if there's no error (successful execution)
+                if (!optimization.error) {
                     const gasAnalysis = optimization.gas_analysis || {};
                     const savings = optimization.potential_savings || {};
                     const optimizations = optimization.optimizations || [];
+                    
+                    output += `\n🔧 Optimization Analysis:\n`;
                     
                     if (gasAnalysis.total_gas) {
                         output += `  📊 Gas Usage:\n`;
@@ -751,10 +1335,7 @@ HTML_TEMPLATE = """
                         output += `  ✅ No optimization opportunities found\n`;
                     }
                 }
-            } else if (results.advanced_analysis) {
-                // Show message if optimization checkbox was not checked
-                output += `\n🔧 Optimization Analysis: Not enabled\n`;
-                output += `  (Enable "Bytecode Optimization" checkbox to use)\n`;
+                // If there's an error, don't show optimization section at all
             }
             
             // Show performance metrics if available
@@ -781,7 +1362,8 @@ HTML_TEMPLATE = """
                 output += `\n✅ No vulnerabilities detected! Contract appears secure.\n`;
             }
             
-            content.textContent = output;
+            // Combine stats HTML and text output
+            content.innerHTML = statsHTML + '<pre style="margin: 0; padding: 0; background: transparent; color: inherit; font-family: inherit; white-space: pre-wrap;">' + output + '</pre>';
             section.style.display = 'block';
         }
         
@@ -806,6 +1388,30 @@ HTML_TEMPLATE = """
 def index():
     """Serve the main page."""
     return render_template_string(HTML_TEMPLATE)
+
+@app.route('/list_contracts', methods=['GET'])
+def list_contracts():
+    """List all available test contract files."""
+    try:
+        test_contracts_dir = os.path.join('test_contracts')
+        
+        if not os.path.exists(test_contracts_dir):
+            return jsonify({'success': False, 'error': 'Test contracts directory not found'})
+        
+        # Get all files in test_contracts directory
+        all_files = os.listdir(test_contracts_dir)
+        
+        # Filter and sort files
+        solidity_files = sorted([f for f in all_files if f.endswith('.sol')])
+        bytecode_files = sorted([f for f in all_files if f.endswith('.bin')])
+        
+        return jsonify({
+            'success': True,
+            'solidity_files': solidity_files,
+            'bytecode_files': bytecode_files
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
@@ -1238,159 +1844,6 @@ def analyze():
         return jsonify({'success': False, 'error': error_msg})
 
 
-# ============================================================================
-# Remix IDE API Endpoints
-# ============================================================================
-
-@app.route('/api/health', methods=['GET'])
-def remix_health_check():
-    """Health check endpoint for Remix IDE."""
-    return jsonify({
-        'status': 'healthy',
-        'service': 'Smart Contract Vulnerability Detector API',
-        'version': '1.0.0'
-    })
-
-
-@app.route('/api/analyze', methods=['POST'])
-def remix_analyze():
-    """
-    Analyze contract for Remix IDE.
-    
-    Request body:
-    {
-        "code": "contract code here",
-        "fileType": "solidity" | "bytecode",
-        "detectors": ["overflow", "reentrancy", ...]  # optional
-    }
-    """
-    try:
-        data = request.get_json()
-        
-        if not data:
-            return jsonify({'success': False, 'error': 'No data provided'}), 400
-        
-        code = data.get('code', '')
-        file_type = data.get('fileType', 'solidity').lower()
-        selected_detectors = data.get('detectors', [])
-        
-        if not code:
-            return jsonify({'success': False, 'error': 'No contract code provided'}), 400
-        
-        # Create a temporary file with the code
-        is_bytecode = file_type == 'bytecode' or file_type == 'bin'
-        suffix = '.bin' if is_bytecode else '.sol'
-        
-        with tempfile.NamedTemporaryFile(mode='w', suffix=suffix, delete=False) as temp_file:
-            temp_file.write(code)
-            temp_path = temp_file.name
-        
-        try:
-            perf_monitor = PerformanceMonitor()
-            perf_monitor.start("total_analysis")
-            
-            if is_bytecode:
-                parser = BytecodeParser()
-                bytecode_hex = code.replace('0x', '').replace(' ', '').replace('\n', '').strip()
-                contract_ast = parser.parse_bytecode(bytecode_hex)
-                
-                all_detectors = [
-                    BytecodeOverflowDetector(),
-                    BytecodeAccessControlDetector(),
-                    BytecodeReentrancyDetector(),
-                    BytecodeTimeManipulationDetector(),
-                    BytecodeDenialOfServiceDetector(),
-                    BytecodeUnprotectedSelfDestructDetector()
-                ]
-            else:
-                parser = SolidityParser()
-                contract_ast = parser.parse_file(temp_path)
-                
-                all_detectors = [
-                    OverflowDetector(),
-                    AccessControlDetector(),
-                    ReentrancyDetector(),
-                    TimeManipulationDetector(),
-                    DenialOfServiceDetector(),
-                    UnprotectedSelfDestructDetector()
-                ]
-            
-            if not contract_ast:
-                return jsonify({'success': False, 'error': 'Failed to parse contract'}), 400
-            
-            # Filter detectors if specified
-            if selected_detectors:
-                detector_map = {
-                    'overflow': (OverflowDetector, BytecodeOverflowDetector),
-                    'access_control': (AccessControlDetector, BytecodeAccessControlDetector),
-                    'reentrancy': (ReentrancyDetector, BytecodeReentrancyDetector),
-                    'time_manipulation': (TimeManipulationDetector, BytecodeTimeManipulationDetector),
-                    'denial_of_service': (DenialOfServiceDetector, BytecodeDenialOfServiceDetector),
-                    'unprotected_selfdestruct': (UnprotectedSelfDestructDetector, BytecodeUnprotectedSelfDestructDetector)
-                }
-                
-                detectors = []
-                for det_name in selected_detectors:
-                    if det_name in detector_map:
-                        det_class = detector_map[det_name][1] if is_bytecode else detector_map[det_name][0]
-                        detectors.append(det_class())
-            else:
-                detectors = all_detectors
-            
-            # Run detectors in parallel
-            perf_monitor.start("detection")
-            all_vulnerabilities = parallel_detect(detectors, contract_ast)
-            perf_monitor.end("detection")
-            perf_monitor.end("total_analysis")
-            
-            # Format response for Remix
-            response = {
-                'success': True,
-                'vulnerabilities': all_vulnerabilities,
-                'summary': {
-                    'total': len(all_vulnerabilities),
-                    'by_severity': {
-                        'Critical': sum(1 for v in all_vulnerabilities if v.get('severity') == 'Critical'),
-                        'High': sum(1 for v in all_vulnerabilities if v.get('severity') == 'High'),
-                        'Medium': sum(1 for v in all_vulnerabilities if v.get('severity') == 'Medium'),
-                        'Low': sum(1 for v in all_vulnerabilities if v.get('severity') == 'Low')
-                    },
-                    'by_type': {}
-                },
-                'performance': perf_monitor.get_metrics()
-            }
-            
-            # Group by type
-            for vuln in all_vulnerabilities:
-                vuln_type = vuln.get('type', 'Unknown')
-                response['summary']['by_type'][vuln_type] = response['summary']['by_type'].get(vuln_type, 0) + 1
-            
-            return jsonify(response)
-        
-        finally:
-            if os.path.exists(temp_path):
-                os.unlink(temp_path)
-    
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/detectors', methods=['GET'])
-def remix_list_detectors():
-    """List all available detectors for Remix IDE."""
-    return jsonify({
-        'success': True,
-        'detectors': [
-            {'id': 'overflow', 'name': 'Integer Overflow/Underflow', 'description': 'Detects unsafe arithmetic operations'},
-            {'id': 'access_control', 'name': 'Access Control Issues', 'description': 'Finds missing access modifiers'},
-            {'id': 'reentrancy', 'name': 'Reentrancy Vulnerabilities', 'description': 'Identifies reentrancy attack vectors'},
-            {'id': 'time_manipulation', 'name': 'Time Manipulation', 'description': 'Detects time-based vulnerabilities'},
-            {'id': 'denial_of_service', 'name': 'Denial of Service', 'description': 'Identifies DoS vulnerabilities'},
-            {'id': 'unprotected_selfdestruct', 'name': 'Unprotected Selfdestruct', 'description': 'Detects unprotected selfdestruct calls'}
-        ]
-    })
-
-
 @app.route('/download')
 def download():
     """Download analysis results."""
@@ -1485,10 +1938,8 @@ if __name__ == '__main__':
     
     if not debug_mode:
         print("📍 Production mode - Ready to analyze smart contracts!")
-        print("📡 Remix API available at: http://localhost:{}/api/analyze".format(port))
     else:
         print(f"📍 Development mode - Open your browser and go to: http://localhost:{port}")
         print("🔍 Ready to analyze smart contracts!")
-        print("📡 Remix API available at: http://localhost:{}/api/analyze".format(port))
     
     app.run(debug=debug_mode, host='0.0.0.0', port=port)
