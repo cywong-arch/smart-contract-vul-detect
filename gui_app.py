@@ -10,10 +10,15 @@ import sys
 import os
 import json
 import threading
+import re
 from pathlib import Path
 
-# Add src to the path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+# Ensure project root is on sys.path so src.* imports work when launched from any cwd
+CURRENT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = CURRENT_DIR
+if (PROJECT_ROOT / "src").exists():
+    if str(PROJECT_ROOT) not in sys.path:
+        sys.path.insert(0, str(PROJECT_ROOT))
 
 class VulnerabilityDetectorGUI:
     def __init__(self, root):
@@ -25,6 +30,10 @@ class VulnerabilityDetectorGUI:
         # Variables
         self.selected_file = tk.StringVar()
         self.analysis_running = False
+        self.enable_fuzzing = tk.BooleanVar(value=False)
+        self.enable_cfg = tk.BooleanVar(value=False)
+        self.enable_formal = tk.BooleanVar(value=False)
+        self.enable_optimization = tk.BooleanVar(value=False)
         
         self.setup_ui()
         
@@ -137,6 +146,12 @@ class VulnerabilityDetectorGUI:
                 font=('Arial', 10)
             )
             cb.pack(anchor='w')
+
+        # Advanced analysis toggles (hidden/disabled in GUI)
+        self.enable_fuzzing.set(False)
+        self.enable_cfg.set(False)
+        self.enable_formal.set(False)
+        self.enable_optimization.set(False)
         
         # Analysis button
         analyze_btn = tk.Button(
@@ -167,10 +182,11 @@ class VulnerabilityDetectorGUI:
         self.results_text = scrolledtext.ScrolledText(
             results_frame,
             wrap=tk.WORD,
-            font=('Consolas', 10),
+            font=('Consolas', 12),
             bg='#2c3e50',
             fg='#ecf0f1',
-            insertbackground='white'
+            insertbackground='white',
+            height=25  # make the results area taller for better readability
         )
         self.results_text.pack(fill='both', expand=True, padx=10, pady=10)
         
@@ -214,6 +230,7 @@ class VulnerabilityDetectorGUI:
             title="Select Solidity Contract File",
             filetypes=[
                 ("Solidity files", "*.sol"),
+                ("Bytecode files", "*.bin"),
                 ("All files", "*.*")
             ]
         )
@@ -252,95 +269,207 @@ class VulnerabilityDetectorGUI:
         """Run the actual analysis."""
         try:
             # Import modules
-            from parsers.solidity_parser import SolidityParser
-            from detectors.overflow_detector import OverflowDetector
-            from detectors.access_control_detector import AccessControlDetector
-            from detectors.reentrancy_detector import ReentrancyDetector
-            from detectors.time_manipulation_detector import TimeManipulationDetector
-            from detectors.denial_of_service_detector import DenialOfServiceDetector
-            from detectors.unprotected_selfdestruct_detector import UnprotectedSelfDestructDetector
+            from src.parsers.solidity_parser import SolidityParser
+            from src.parsers.bytecode_parser import BytecodeParser
+            from src.detectors.overflow_detector import OverflowDetector
+            from src.detectors.access_control_detector import AccessControlDetector
+            from src.detectors.reentrancy_detector import ReentrancyDetector
+            from src.detectors.time_manipulation_detector import TimeManipulationDetector
+            from src.detectors.denial_of_service_detector import DenialOfServiceDetector
+            from src.detectors.unprotected_selfdestruct_detector import UnprotectedSelfDestructDetector
+            from src.detectors.bytecode_overflow_detector import BytecodeOverflowDetector
+            from src.detectors.bytecode_access_control_detector import BytecodeAccessControlDetector
+            from src.detectors.bytecode_reentrancy_detector import BytecodeReentrancyDetector
+            from src.detectors.bytecode_time_manipulation_detector import BytecodeTimeManipulationDetector
+            from src.detectors.bytecode_unprotected_selfdestruct_detector import BytecodeUnprotectedSelfDestructDetector
+            from src.detectors.bytecode_denial_of_service_detector import BytecodeDenialOfServiceDetector
+            from src.utils.reporter import VulnerabilityReporter
+            from src.utils.performance import PerformanceMonitor, ASTCache, parallel_detect
             
             contract_file = self.selected_file.get()
+            file_ext = Path(contract_file).suffix.lower()
+            is_bytecode = file_ext == '.bin'
+            
+            perf_monitor = PerformanceMonitor()
+            ast_cache = ASTCache()
+            reporter = VulnerabilityReporter()
+            perf_monitor.start("total_analysis")
             
             # Update UI
-            self.root.after(0, self.update_results, f"🔍 Analyzing: {os.path.basename(contract_file)}\n")
+            self.root.after(0, self.update_results, f"🔍 Analyzing: {os.path.basename(contract_file)} ({'Bytecode' if is_bytecode else 'Solidity'})\n")
             self.root.after(0, self.update_results, "="*60 + "\n")
             
-            # Initialize parser
-            parser = SolidityParser()
-            self.root.after(0, self.update_results, "✓ Initialized parser\n")
-            
-            # Parse contract
-            contract_ast = parser.parse_file(contract_file)
-            if not contract_ast:
-                self.root.after(0, self.update_results, "❌ Failed to parse contract\n")
-                return
+            if is_bytecode:
+                parser = BytecodeParser()
+                bytecode_hex = None
+
+                # Prefer text hex (like web_app) to avoid binary misreads
+                try:
+                    with open(contract_file, 'r') as f:
+                        text_content = f.read().strip()
+                    candidate = text_content.replace('0x', '').replace(' ', '').replace('\n', '').replace('\r', '')
+                    if candidate and re.fullmatch(r'[0-9a-fA-F]+', candidate):
+                        bytecode_hex = candidate
+                except Exception:
+                    bytecode_hex = None
+
+                if not bytecode_hex:
+                    try:
+                        with open(contract_file, 'rb') as f:
+                            bytecode_bytes = f.read()
+                        bytecode_hex = bytecode_bytes.hex()
+                    except Exception as e:
+                        self.root.after(0, self.update_results, f"❌ Failed to read bytecode: {e}\n")
+                        return
+
+                contract_ast = parser.parse_bytecode(bytecode_hex)
+                if not contract_ast:
+                    self.root.after(0, self.update_results, "❌ Failed to parse bytecode\n")
+                    return
                 
-            self.root.after(0, self.update_results, f"✓ Contract parsed successfully\n")
-            self.root.after(0, self.update_results, f"  - Functions found: {len(contract_ast.get('functions', []))}\n")
-            self.root.after(0, self.update_results, f"  - Variables found: {len(contract_ast.get('variables', []))}\n\n")
-            
-            # Initialize detectors based on selection
-            detectors = []
-            if self.detector_vars['overflow'].get():
-                detectors.append(OverflowDetector())
-            if self.detector_vars['access_control'].get():
-                detectors.append(AccessControlDetector())
-            if self.detector_vars['reentrancy'].get():
-                detectors.append(ReentrancyDetector())
-            if self.detector_vars['time_manipulation'].get():
-                detectors.append(TimeManipulationDetector())
-            if self.detector_vars['denial_of_service'].get():
-                detectors.append(DenialOfServiceDetector())
-            if self.detector_vars['unprotected_selfdestruct'].get():
-                detectors.append(UnprotectedSelfDestructDetector())
-                
-            # Run detectors
-            all_vulnerabilities = []
-            detector_results = {}
-            
-            for detector in detectors:
-                detector_name = detector.__class__.__name__
-                self.root.after(0, self.update_results, f"🔍 Running {detector_name}...\n")
-                
-                vulnerabilities = detector.detect(contract_ast)
-                all_vulnerabilities.extend(vulnerabilities)
-                detector_results[detector_name] = len(vulnerabilities)
-                
-                if vulnerabilities:
-                    self.root.after(0, self.update_results, f"  ⚠️  Found {len(vulnerabilities)} issues\n")
-                else:
-                    self.root.after(0, self.update_results, f"  ✅ No issues found\n")
-                    
-            # Display summary
-            self.root.after(0, self.update_results, f"\n📊 Analysis Summary:\n")
-            self.root.after(0, self.update_results, "="*60 + "\n")
-            self.root.after(0, self.update_results, f"Total vulnerabilities: {len(all_vulnerabilities)}\n")
-            
-            for detector_name, count in detector_results.items():
-                self.root.after(0, self.update_results, f"{detector_name}: {count} issues\n")
-                
-            # Display vulnerability details
-            if all_vulnerabilities:
-                self.root.after(0, self.update_results, f"\n⚠️  Vulnerability Details:\n")
-                self.root.after(0, self.update_results, "="*60 + "\n")
-                
-                for i, vuln in enumerate(all_vulnerabilities, 1):
-                    self.root.after(0, self.update_results, f"{i}. {vuln.get('type', 'Unknown')}\n")
-                    self.root.after(0, self.update_results, f"   Description: {vuln.get('description', 'No description')}\n")
-                    if vuln.get('recommendation'):
-                        self.root.after(0, self.update_results, f"   💡 Fix: {vuln.get('recommendation')}\n")
-                    self.root.after(0, self.update_results, "\n")
+                detectors = [
+                    BytecodeOverflowDetector(),
+                    BytecodeAccessControlDetector(),
+                    BytecodeReentrancyDetector(),
+                    BytecodeTimeManipulationDetector(),
+                    BytecodeDenialOfServiceDetector(),
+                    BytecodeUnprotectedSelfDestructDetector()
+                ]
             else:
-                self.root.after(0, self.update_results, f"\n✅ No vulnerabilities detected! Contract appears secure.\n")
+                parser = SolidityParser()
+                self.root.after(0, self.update_results, "✓ Initialized parser\n")
                 
+                # Parse contract with caching and Unicode cleaning similar to web_app
+                perf_monitor.start("parsing")
+                contract_ast = ast_cache.get(contract_file)
+                if not contract_ast:
+                    contract_ast = parser.parse_file(contract_file)
+                    if not contract_ast:
+                        self.root.after(0, self.update_results, "❌ Failed to parse contract\n")
+                        return
+                    # Clean potential Unicode artifacts in parsed content for consistency
+                    if 'content' in contract_ast:
+                        contract_ast['content'] = re.sub(r'[^\x00-\x7F]+', '[UNICODE]', str(contract_ast['content']))
+                    ast_cache.set(contract_file, contract_ast)
+                perf_monitor.end("parsing")
+                
+                self.root.after(0, self.update_results, f"✓ Contract parsed successfully\n")
+                self.root.after(0, self.update_results, f"  - Functions found: {len(contract_ast.get('functions', []))}\n")
+                self.root.after(0, self.update_results, f"  - Variables found: {len(contract_ast.get('variables', []))}\n\n")
+                
+                # Initialize detectors based on selection
+                detectors = []
+                if self.detector_vars['overflow'].get():
+                    detectors.append(OverflowDetector())
+                if self.detector_vars['access_control'].get():
+                    detectors.append(AccessControlDetector())
+                if self.detector_vars['reentrancy'].get():
+                    detectors.append(ReentrancyDetector())
+                if self.detector_vars['time_manipulation'].get():
+                    detectors.append(TimeManipulationDetector())
+                if self.detector_vars['denial_of_service'].get():
+                    detectors.append(DenialOfServiceDetector())
+                if self.detector_vars['unprotected_selfdestruct'].get():
+                    detectors.append(UnprotectedSelfDestructDetector())
+            
+            # Run detectors in parallel
+            perf_monitor.start("detection")
+            all_vulnerabilities = parallel_detect(detectors, contract_ast)
+            perf_monitor.end("detection")
+            
+            # Advanced analysis modules
+            advanced_results = {}
+            
+            if self.enable_fuzzing.get():
+                if is_bytecode:
+                    advanced_results['fuzzing'] = {
+                        'error': 'Fuzzing only works with Solidity files, not bytecode',
+                        'metrics': {'functions_tested': 0, 'iterations': 0, 'vulnerabilities_found': 0}
+                    }
+                    self.root.after(0, self.update_results, "ℹ️  Fuzzing is only available for Solidity files\n")
+                else:
+                    try:
+                        from analysis.fuzzer import Fuzzer
+                        fuzzer = Fuzzer()
+                        fuzzer.enable()
+                        fuzzing_results = fuzzer.analyze(contract_ast)
+                        advanced_results['fuzzing'] = fuzzing_results
+                        if 'vulnerabilities' in fuzzing_results:
+                            all_vulnerabilities.extend(fuzzing_results['vulnerabilities'])
+                        self.root.after(0, self.update_results, "✓ Fuzzing analysis completed\n")
+                    except ImportError:
+                        self.root.after(0, self.update_results, "⚠️  Fuzzing module not available\n")
+                    except Exception as e:
+                        self.root.after(0, self.update_results, f"⚠️  Fuzzing failed: {e}\n")
+            
+            if self.enable_cfg.get():
+                try:
+                    from analysis.control_flow import ControlFlowAnalyzer, DataFlowAnalyzer
+                    cfg_analyzer = ControlFlowAnalyzer()
+                    cfg_analyzer.enable()
+                    cfg_results = cfg_analyzer.analyze(contract_ast)
+                    
+                    df_analyzer = DataFlowAnalyzer()
+                    df_analyzer.enable()
+                    df_results = df_analyzer.analyze(contract_ast)
+                    
+                    advanced_results['control_flow'] = cfg_results
+                    advanced_results['data_flow'] = df_results
+                    self.root.after(0, self.update_results, "✓ Control/Data-flow analysis completed\n")
+                except ImportError:
+                    self.root.after(0, self.update_results, "⚠️  Control/Data-flow module not available\n")
+                except Exception as e:
+                    self.root.after(0, self.update_results, f"⚠️  Control/Data-flow failed: {e}\n")
+            
+            if self.enable_optimization.get():
+                if is_bytecode:
+                    try:
+                        from src.optimization.optimizer import BytecodeOptimizer
+                        perf_monitor.start("optimization")
+                        optimizer = BytecodeOptimizer()
+                        optimization_results = optimizer.detect(contract_ast.get('opcodes', []), contract_ast)
+                        gas_analysis = optimizer.analyze_gas_usage(contract_ast.get('opcodes', []))
+                        savings = optimizer.calculate_potential_savings(optimization_results)
+                        
+                        advanced_results['optimization'] = {
+                            'optimizations': optimization_results,
+                            'gas_analysis': gas_analysis,
+                            'potential_savings': savings
+                        }
+                        perf_monitor.end("optimization")
+                        self.root.after(0, self.update_results, f"✓ Optimization analysis completed: {len(optimization_results)} opportunities\n")
+                    except ImportError:
+                        self.root.after(0, self.update_results, "⚠️  Optimization module not available\n")
+                    except Exception as e:
+                        self.root.after(0, self.update_results, f"⚠️  Optimization analysis failed: {e}\n")
+                else:
+                    advanced_results['optimization'] = {
+                        'error': 'Optimization analysis is only available for bytecode files, not Solidity',
+                        'metrics': {'optimizations_found': 0, 'total_savings': 0}
+                    }
+                    self.root.after(0, self.update_results, "ℹ️  Optimization available for bytecode (.bin) files only\n")
+            
+            if self.enable_formal.get():
+                self.root.after(0, self.update_results, "ℹ️  Formal verification module not yet implemented\n")
+            
+            # Generate report
+            perf_monitor.start("reporting")
+            report = reporter.generate_report(all_vulnerabilities, contract_file)
+            if advanced_results:
+                report['advanced_analysis'] = advanced_results
+            perf_monitor.end("reporting")
+            
+            perf_monitor.end("total_analysis")
+            report['performance'] = perf_monitor.get_metrics()
+            
+            # Display textual report (hide advanced analysis sections in the UI)
+            display_report = dict(report)
+            display_report.pop('advanced_analysis', None)
+            text_report = json.dumps(display_report, indent=2)
+            self.root.after(0, self.update_results, text_report + "\n")
+            
             # Store results for saving
-            self.last_results = {
-                'contract_file': contract_file,
-                'total_vulnerabilities': len(all_vulnerabilities),
-                'detector_results': detector_results,
-                'vulnerabilities': all_vulnerabilities
-            }
+            self.last_results = report
             
         except UnicodeDecodeError as e:
             error_msg = f"❌ Encoding Error: The file contains characters that cannot be decoded.\n\n💡 Solution: Try saving the file with UTF-8 encoding in your text editor.\n\nError details: {str(e)}\n"

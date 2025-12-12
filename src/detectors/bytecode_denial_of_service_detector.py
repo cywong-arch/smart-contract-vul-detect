@@ -50,6 +50,7 @@ class BytecodeDenialOfServiceDetector(VulnerabilityDetector):
     def _check_external_calls_in_loops(self, opcodes: List[Dict]) -> List[Dict[str, Any]]:
         """Check for external calls inside loops."""
         vulnerabilities = []
+        reported_positions = set()
         
         # Find loops by looking for JUMP/JUMPI patterns
         loops = self._find_loops(opcodes)
@@ -60,6 +61,8 @@ class BytecodeDenialOfServiceDetector(VulnerabilityDetector):
             
             for op in loop_opcodes:
                 if op["name"] in self.external_call_opcodes:
+                    if op["position"] in reported_positions:
+                        continue
                     vulnerabilities.append(self._create_vulnerability(
                         vuln_type="Denial of Service",
                         severity="High",
@@ -68,6 +71,7 @@ class BytecodeDenialOfServiceDetector(VulnerabilityDetector):
                         code_snippet=f"Position {op['position']}: {op['name']} in loop",
                         recommendation="Avoid external calls in loops. Use pull payment pattern or batch operations instead."
                     ))
+                    reported_positions.add(op["position"])
                     break  # Only report once per loop
         
         return vulnerabilities
@@ -99,6 +103,7 @@ class BytecodeDenialOfServiceDetector(VulnerabilityDetector):
     def _check_gas_consuming_in_loops(self, opcodes: List[Dict]) -> List[Dict[str, Any]]:
         """Check for gas-consuming operations in loops."""
         vulnerabilities = []
+        reported_positions = set()
         
         loops = self._find_loops(opcodes)
         
@@ -107,6 +112,8 @@ class BytecodeDenialOfServiceDetector(VulnerabilityDetector):
             
             for op in loop_opcodes:
                 if op["name"] in self.gas_consuming_opcodes:
+                    if op["position"] in reported_positions:
+                        continue
                     vulnerabilities.append(self._create_vulnerability(
                         vuln_type="Denial of Service",
                         severity="Medium",
@@ -115,6 +122,7 @@ class BytecodeDenialOfServiceDetector(VulnerabilityDetector):
                         code_snippet=f"Position {op['position']}: {op['name']} in loop",
                         recommendation="Be cautious with gas-consuming operations in loops. Consider gas limits and operation complexity."
                     ))
+                    reported_positions.add(op["position"])
                     break
         
         return vulnerabilities

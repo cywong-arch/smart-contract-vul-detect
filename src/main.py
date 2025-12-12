@@ -6,25 +6,33 @@ Main entry point for the Smart Contract Vulnerability Detection System.
 import click
 import json
 import sys
+import tempfile
+import re
 from pathlib import Path
 from typing import List, Dict, Any
 
-from parsers.solidity_parser import SolidityParser
-from parsers.bytecode_parser import BytecodeParser
-from detectors.overflow_detector import OverflowDetector
-from detectors.access_control_detector import AccessControlDetector
-from detectors.reentrancy_detector import ReentrancyDetector
-from detectors.time_manipulation_detector import TimeManipulationDetector
-from detectors.denial_of_service_detector import DenialOfServiceDetector
-from detectors.unprotected_selfdestruct_detector import UnprotectedSelfDestructDetector
-from detectors.bytecode_overflow_detector import BytecodeOverflowDetector
-from detectors.bytecode_access_control_detector import BytecodeAccessControlDetector
-from detectors.bytecode_reentrancy_detector import BytecodeReentrancyDetector
-from detectors.bytecode_time_manipulation_detector import BytecodeTimeManipulationDetector
-from detectors.bytecode_unprotected_selfdestruct_detector import BytecodeUnprotectedSelfDestructDetector
-from detectors.bytecode_denial_of_service_detector import BytecodeDenialOfServiceDetector
-from utils.reporter import VulnerabilityReporter
-from utils.performance import PerformanceMonitor, ASTCache, parallel_detect
+# Ensure project root is on sys.path so package imports work when executed via python -m src.main
+CURRENT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = CURRENT_DIR.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.parsers.solidity_parser import SolidityParser
+from src.parsers.bytecode_parser import BytecodeParser
+from src.detectors.overflow_detector import OverflowDetector
+from src.detectors.access_control_detector import AccessControlDetector
+from src.detectors.reentrancy_detector import ReentrancyDetector
+from src.detectors.time_manipulation_detector import TimeManipulationDetector
+from src.detectors.denial_of_service_detector import DenialOfServiceDetector
+from src.detectors.unprotected_selfdestruct_detector import UnprotectedSelfDestructDetector
+from src.detectors.bytecode_overflow_detector import BytecodeOverflowDetector
+from src.detectors.bytecode_access_control_detector import BytecodeAccessControlDetector
+from src.detectors.bytecode_reentrancy_detector import BytecodeReentrancyDetector
+from src.detectors.bytecode_time_manipulation_detector import BytecodeTimeManipulationDetector
+from src.detectors.bytecode_unprotected_selfdestruct_detector import BytecodeUnprotectedSelfDestructDetector
+from src.detectors.bytecode_denial_of_service_detector import BytecodeDenialOfServiceDetector
+from src.utils.reporter import VulnerabilityReporter
+from src.utils.performance import PerformanceMonitor, ASTCache, parallel_detect
 from colorama import Fore, Style
 
 
@@ -66,67 +74,78 @@ def main(contract_file: str, output: str, output_format: str, verbose: bool,
         # Initialize AST cache (for Solidity files)
         ast_cache = ASTCache() if not is_bytecode else None
         
-        # Initialize parser and detectors based on file type
-        if is_bytecode:
-            # Bytecode analysis
-            parser = BytecodeParser()
-            
-            # Read bytecode file
-            try:
-                with open(contract_file, 'rb') as f:
-                    bytecode_bytes = f.read()
-                bytecode_hex = bytecode_bytes.hex()
-            except:
-                # Try reading as text (hex string)
-                with open(contract_file, 'r') as f:
-                    bytecode_hex = f.read().strip().replace('0x', '').replace(' ', '').replace('\n', '')
-            
-            # Parse bytecode
-            contract_ast = parser.parse_bytecode(bytecode_hex)
-            if not contract_ast:
-                click.echo("Error: Failed to parse bytecode", err=True)
-                sys.exit(1)
-            
-            # Initialize bytecode detectors
-            detectors = [
-                BytecodeOverflowDetector(),
-                BytecodeAccessControlDetector(),
-                BytecodeReentrancyDetector(),
-                BytecodeTimeManipulationDetector(),
-                BytecodeDenialOfServiceDetector(),
-                BytecodeUnprotectedSelfDestructDetector()
-            ]
-        else:
-            # Solidity analysis
-        parser = SolidityParser()
-            
-            # Check cache first
-            perf_monitor.start("parsing")
-            contract_ast = None
-            if ast_cache:
-                contract_ast = ast_cache.get(contract_file)
-            
-            if not contract_ast:
-                # Parse the contract
-                contract_ast = parser.parse_file(contract_file)
+        temp_sol_path = None
+        try:
+            # Initialize parser and detectors based on file type
+            if is_bytecode:
+                # Bytecode analysis (prefer text hex if available, else binary)
+                parser = BytecodeParser()
+                bytecode_hex = None
+
+                # Try reading as text hex first
+                try:
+                    with open(contract_file, 'r') as f:
+                        text_content = f.read().strip()
+                    candidate = text_content.replace('0x', '').replace(' ', '').replace('\n', '').replace('\r', '')
+                    if candidate and re.fullmatch(r'[0-9a-fA-F]+', candidate):
+                        bytecode_hex = candidate
+                except Exception:
+                    bytecode_hex = None
+
+                # Fallback to binary read if text hex not valid
+                if not bytecode_hex:
+                    with open(contract_file, 'rb') as f:
+                        bytecode_bytes = f.read()
+                    bytecode_hex = bytecode_bytes.hex()
+                
+                contract_ast = parser.parse_bytecode(bytecode_hex)
                 if not contract_ast:
-                    click.echo("Error: Failed to parse contract", err=True)
+                    click.echo("Error: Failed to parse bytecode", err=True)
                     sys.exit(1)
-                # Cache the result
+                
+                detectors = [
+                    BytecodeOverflowDetector(),
+                    BytecodeAccessControlDetector(),
+                    BytecodeReentrancyDetector(),
+                    BytecodeTimeManipulationDetector(),
+                    BytecodeDenialOfServiceDetector(),
+                    BytecodeUnprotectedSelfDestructDetector()
+                ]
+            else:
+                # Solidity analysis with cache and Unicode cleaning
+                parser = SolidityParser()
+                
+                perf_monitor.start("parsing")
+                contract_ast = None
                 if ast_cache:
-                    ast_cache.set(contract_file, contract_ast)
-            
-            perf_monitor.end("parsing")
-            
-            # Initialize Solidity detectors
-        detectors = [
-            OverflowDetector(),
-            AccessControlDetector(),
-            ReentrancyDetector(),
-            TimeManipulationDetector(),
-            DenialOfServiceDetector(),
-            UnprotectedSelfDestructDetector()
-        ]
+                    contract_ast = ast_cache.get(contract_file)
+                
+                if not contract_ast:
+                    temp_sol_path = _prepare_solidity_file(contract_file)
+                    parse_path = temp_sol_path or contract_file
+                    contract_ast = parser.parse_file(parse_path)
+                    if not contract_ast:
+                        click.echo("Error: Failed to parse contract", err=True)
+                        sys.exit(1)
+                    if ast_cache:
+                        ast_cache.set(contract_file, contract_ast)
+                
+                perf_monitor.end("parsing")
+                
+                detectors = [
+                    OverflowDetector(),
+                    AccessControlDetector(),
+                    ReentrancyDetector(),
+                    TimeManipulationDetector(),
+                    DenialOfServiceDetector(),
+                    UnprotectedSelfDestructDetector()
+                ]
+        finally:
+            if temp_sol_path:
+                try:
+                    Path(temp_sol_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
         
         reporter = VulnerabilityReporter()
         
@@ -144,12 +163,11 @@ def main(contract_file: str, output: str, output_format: str, verbose: bool,
             # Dynamic Analysis (Fuzzing)
             if enable_fuzzing:
                 try:
-                    from analysis.fuzzer import Fuzzer
+                    from src.analysis.fuzzer import Fuzzer
                     fuzzer = Fuzzer()
                     fuzzer.enable()
                     fuzzing_results = fuzzer.analyze(contract_ast)
                     advanced_results['fuzzing'] = fuzzing_results
-                    # Extract vulnerabilities from fuzzing results
                     if 'vulnerabilities' in fuzzing_results:
                         all_vulnerabilities.extend(fuzzing_results['vulnerabilities'])
                     if verbose:
@@ -164,7 +182,7 @@ def main(contract_file: str, output: str, output_format: str, verbose: bool,
             # Control-Flow Analysis
             if enable_cfg:
                 try:
-                    from analysis.control_flow import ControlFlowAnalyzer, DataFlowAnalyzer
+                    from src.analysis.control_flow import ControlFlowAnalyzer, DataFlowAnalyzer
                     cfg_analyzer = ControlFlowAnalyzer()
                     cfg_analyzer.enable()
                     cfg_results = cfg_analyzer.analyze(contract_ast)
@@ -189,7 +207,7 @@ def main(contract_file: str, output: str, output_format: str, verbose: bool,
             if enable_optimization:
                 try:
                     if is_bytecode:
-                        from optimization.optimizer import BytecodeOptimizer
+                        from src.optimization.optimizer import BytecodeOptimizer
                         perf_monitor.start("optimization")
                         optimizer = BytecodeOptimizer()
                         optimization_results = optimizer.detect(contract_ast.get('opcodes', []), contract_ast)
@@ -328,6 +346,31 @@ def _display_optimization_results(opt_data: Dict[str, Any]):
         click.echo(f"   Potential Savings: {opt.get('gas_savings', 0):,} gas")
         if opt.get('recommendation'):
             click.echo(f"   [TIP] Recommendation: {opt.get('recommendation')}")
+
+
+def _prepare_solidity_file(contract_file: str) -> str:
+    """
+    Create a cleaned, temporary copy of a Solidity file to avoid decode errors.
+    Returns path to the temp file (caller cleans up).
+    """
+    encodings = ['utf-8', 'utf-8-sig', 'latin-1', 'cp1252']
+    content = None
+    for encoding in encodings:
+        try:
+            with open(contract_file, 'r', encoding=encoding) as f:
+                content = f.read()
+            break
+        except UnicodeDecodeError:
+            continue
+    if content is None:
+        raise UnicodeDecodeError("utf-8", b"", 0, 1, "Unable to decode file with known encodings")
+    
+    # Aggressively remove non-ASCII characters that can break downstream tooling
+    cleaned_content = re.sub(r'[^\x00-\x7F]+', '[UNICODE]', content)
+    
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.sol', delete=False, encoding='utf-8') as tmp:
+        tmp.write(cleaned_content)
+        return tmp.name
 
 
 if __name__ == '__main__':
