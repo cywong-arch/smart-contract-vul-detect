@@ -82,9 +82,10 @@ def main():
     print("🎉 Setup completed successfully!")
     print("=" * 60)
     print("\nNext steps:")
-    print("1. Run the demo: python examples/demo.py")
-    print("2. Analyze a contract: python src/main.py <contract_file.sol>")
-    print("3. Check the README.md for more information")
+    print("1. Analyze a contract: python src/main.py <contract_file.sol>")
+    print("2. Launch GUI: python gui_app.py")
+    print("3. Launch Web App: python web_app.py")
+    print("4. Check the README.md for more information")
     
     return True
 

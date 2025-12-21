@@ -62,8 +62,6 @@ Instead of training ML models, this system uses **pattern-based static analysis*
 │   └── README.md
 ├── gui_app.py                  # Desktop GUI application
 ├── web_app.py                  # Web-based interface (includes Remix API)
-├── run_analysis.py             # Simple analysis runner
-├── run_bytecode_analysis.py    # Bytecode analysis runner
 ├── start_remix_api.py          # Standalone Remix API server
 ├── requirements.txt            # Python dependencies
 ├── FUZZING_VS_STATIC_ANALYSIS.md # Fuzzing documentation
@@ -119,16 +117,7 @@ python src/main.py contract.sol --enable-fuzzing    # Enable fuzzing
 python src/main.py contract.bin --enable-optimization # Enable bytecode optimization
 ```
 
-#### Option 2: Simple Analysis Runner
-```bash
-# Analyze a specific contract
-python run_analysis.py test_contracts/vulnerable_overflow.sol
-
-# Analyze bytecode
-python run_bytecode_analysis.py test_contracts/test_overflow_only.bin --verbose
-```
-
-#### Option 3: Desktop GUI Application
+#### Option 2: Desktop GUI Application
 ```bash
 # Launch the desktop application
 python gui_app.py
@@ -138,7 +127,7 @@ python gui_app.py
 - Click "Start Analysis"
 - View results in the interface
 
-#### Option 4: Web Application (Recommended)
+#### Option 3: Web Application (Recommended)
 ```bash
 # Start the web server (includes Remix API)
 python web_app.py
@@ -168,77 +157,77 @@ python web_app.py
 #### Test with Level-Based Contracts
 ```bash
 # Test basic level contracts
-python run_analysis.py test_contracts/overflow_level1_basic.sol
-python run_analysis.py test_contracts/access_control_level1_basic.sol
-python run_analysis.py test_contracts/reentrancy_level1_basic.sol
-python run_analysis.py test_contracts/time_manipulation_level1_basic.sol
-python run_analysis.py test_contracts/denial_of_service_level1_basic.sol
-python run_analysis.py test_contracts/unprotected_selfdestruct_level1_basic.sol
+python src/main.py test_contracts/overflow_level1_basic.sol
+python src/main.py test_contracts/access_control_level1_basic.sol
+python src/main.py test_contracts/reentrancy_level1_basic.sol
+python src/main.py test_contracts/time_manipulation_level1_basic.sol
+python src/main.py test_contracts/denial_of_service_level1_basic.sol
+python src/main.py test_contracts/unprotected_selfdestruct_level1_basic.sol
 
 # Test intermediate level contracts
-python run_analysis.py test_contracts/overflow_level2_intermediate.sol
-python run_analysis.py test_contracts/access_control_level2_intermediate.sol
+python src/main.py test_contracts/overflow_level2_intermediate.sol
+python src/main.py test_contracts/access_control_level2_intermediate.sol
 # ... and so on
 
 # Test advanced level contracts
-python run_analysis.py test_contracts/overflow_level3_advanced.sol
-python run_analysis.py test_contracts/access_control_level3_advanced.sol
+python src/main.py test_contracts/overflow_level3_advanced.sol
+python src/main.py test_contracts/access_control_level3_advanced.sol
 # ... and so on
 ```
 
 #### Test with Mixed Vulnerability Contracts
 ```bash
 # Test mixed vulnerability contracts
-python run_analysis.py test_contracts/mixed_vuln_level1_overflow_only.sol
-python run_analysis.py test_contracts/mixed_vuln_level2_overflow_accesscontrol.sol
-python run_analysis.py test_contracts/mixed_vuln_level3_overflow_accesscontrol_reentrancy.sol
+python src/main.py test_contracts/mixed_vuln_level1_overflow_only.sol
+python src/main.py test_contracts/mixed_vuln_level2_overflow_accesscontrol.sol
+python src/main.py test_contracts/mixed_vuln_level3_overflow_accesscontrol_reentrancy.sol
 
 # Test progressive time manipulation + DoS contracts
-python run_analysis.py test_contracts/mixed_vuln_level1_time_dos.sol      # Time only
-python run_analysis.py test_contracts/mixed_vuln_level2_time_dos.sol      # Time + DoS
-python run_analysis.py test_contracts/mixed_vuln_level3_time_dos.sol      # Time + DoS + Selfdestruct
+python src/main.py test_contracts/mixed_vuln_level1_time_dos.sol      # Time only
+python src/main.py test_contracts/mixed_vuln_level2_time_dos.sol      # Time + DoS
+python src/main.py test_contracts/mixed_vuln_level3_time_dos.sol      # Time + DoS + Selfdestruct
 ```
 
 #### Test with Basic Vulnerable Contracts
 ```bash
 # Test overflow/underflow detection
-python run_analysis.py test_contracts/vulnerable_overflow.sol
+python src/main.py test_contracts/vulnerable_overflow.sol
 
 # Test access control detection
-python run_analysis.py test_contracts/vulnerable_access_control.sol
+python src/main.py test_contracts/vulnerable_access_control.sol
 
 # Test reentrancy detection
-python run_analysis.py test_contracts/vulnerable_reentrancy.sol
+python src/main.py test_contracts/vulnerable_reentrancy.sol
 
 # Test time manipulation detection
-python run_analysis.py test_contracts/vulnerable_time_manipulation.sol
+python src/main.py test_contracts/vulnerable_time_manipulation.sol
 
 # Test denial of service detection
-python run_analysis.py test_contracts/vulnerable_denial_of_service.sol
+python src/main.py test_contracts/vulnerable_denial_of_service.sol
 
 # Test unprotected selfdestruct detection
-python run_analysis.py test_contracts/vulnerable_unprotected_selfdestruct.sol
+python src/main.py test_contracts/vulnerable_unprotected_selfdestruct.sol
 ```
 
 #### Test Bytecode Files
 ```bash
 # Test bytecode overflow detection
-python run_bytecode_analysis.py test_contracts/test_overflow_only.bin --verbose
+python src/main.py test_contracts/test_overflow_only.bin --verbose
 
 # Test bytecode reentrancy detection
-python run_bytecode_analysis.py test_contracts/test_reentrancy_only.bin --verbose
+python src/main.py test_contracts/test_reentrancy_only.bin --verbose
 
 # Test bytecode access control detection
-python run_bytecode_analysis.py test_contracts/test_access_control_only.bin --verbose
+python src/main.py test_contracts/test_access_control_only.bin --verbose
 
 # Test bytecode time manipulation detection
-python run_bytecode_analysis.py test_contracts/test_time_manipulation_only.bin --verbose
+python src/main.py test_contracts/test_time_manipulation_only.bin --verbose
 
 # Test bytecode DoS detection
-python run_bytecode_analysis.py test_contracts/test_denial_of_service_only.bin --verbose
+python src/main.py test_contracts/test_denial_of_service_only.bin --verbose
 
 # Test bytecode selfdestruct detection
-python run_bytecode_analysis.py test_contracts/test_unprotected_selfdestruct_only.bin --verbose
+python src/main.py test_contracts/test_unprotected_selfdestruct_only.bin --verbose
 ```
 
 ## 📋 Available Commands
@@ -369,9 +358,6 @@ dir test_contracts
 ```bash
 # Show help for CLI
 python src/main.py --help
-
-# Show help for run_analysis
-python run_analysis.py --help
 ```
 
 ## 📊 Expected Output
