@@ -40,12 +40,14 @@ class Fuzzer(BaseAnalysis):
         Returns:
             Analysis results
         """
-        if not self.enabled:
-            return AnalysisResult("fuzzing").to_dict()
-        
         result = AnalysisResult("fuzzing")
         result.add_metric("iterations", 0)
         result.add_metric("functions_tested", 0)
+        result.add_metric("vulnerabilities_found", 0)
+        
+        if not self.enabled:
+            result.add_warning("Fuzzing is disabled")
+            return result.to_dict()
         
         try:
             # Extract functions from AST
@@ -68,16 +70,30 @@ class Fuzzer(BaseAnalysis):
             
             result.add_metric("functions_tested", len(testable_functions))
             
-            # Fuzz each testable function
-            for func in testable_functions:
-                func_vulns = self._fuzz_function(func, content, ast)
-                result.vulnerabilities.extend(func_vulns)
-            
-            result.add_metric("iterations", self.max_iterations * len(testable_functions))
-            result.add_metric("vulnerabilities_found", len(result.vulnerabilities))
+            # Fuzz each testable function with error handling
+            # If any function fuzzing fails, we don't want partial results
+            try:
+                for func in testable_functions:
+                    func_vulns = self._fuzz_function(func, content, ast)
+                    result.vulnerabilities.extend(func_vulns)
+                
+                result.add_metric("iterations", self.max_iterations * len(testable_functions))
+                result.add_metric("vulnerabilities_found", len(result.vulnerabilities))
+            except Exception as e:
+                # If there's an error during the fuzzing loop, clear all vulnerabilities
+                # This ensures we don't report partial results
+                result.add_error(f"Fuzzing error during function analysis: {str(e)}")
+                result.vulnerabilities = []  # Clear all vulnerabilities on error
+                result.add_metric("vulnerabilities_found", 0)  # Reset to 0
+                result.add_metric("iterations", 0)  # Reset iterations to 0 on error
             
         except Exception as e:
+            # If there's an error during fuzzing setup, clear any vulnerabilities found
+            # and reset metrics to indicate fuzzing failed
             result.add_error(f"Fuzzing error: {str(e)}")
+            result.vulnerabilities = []  # Clear vulnerabilities on error
+            result.add_metric("vulnerabilities_found", 0)  # Reset to 0
+            result.add_metric("iterations", 0)  # Reset iterations to 0 on error
         
         return result.to_dict()
     
@@ -192,65 +208,82 @@ class Fuzzer(BaseAnalysis):
         func_name = function.get('name', 'unknown')
         func_body = function.get('body', '')
         
-        # Enhanced vulnerability detection with input context
-        
-        # 1. Check for reentrancy with large input values
-        if self._has_external_calls(func_body):
-            # Large input might trigger reentrancy
-            if any(isinstance(inp, int) and inp > 10**18 for inp in inputs):
-                if not self._has_reentrancy_guard(func_body):
+        try:
+            # Enhanced vulnerability detection with input context
+            
+            # Helper function to safely get max int value from inputs
+            def safe_max_int(inputs_list):
+                """Safely get maximum integer value from inputs, ignoring non-ints."""
+                int_values = [inp for inp in inputs_list if isinstance(inp, int)]
+                return max(int_values) if int_values else 0
+            
+            # 1. Check for reentrancy with large input values
+            if self._has_external_calls(func_body):
+                # Large input might trigger reentrancy - safely check for int values
+                large_int_inputs = [inp for inp in inputs if isinstance(inp, int) and inp > 10**18]
+                if large_int_inputs:
+                    if not self._has_reentrancy_guard(func_body):
+                        vuln = self._create_vulnerability(
+                            vuln_type="Reentrancy (Fuzzing)",
+                            severity="High",
+                            description=f"Potential reentrancy in '{func_name}' with large input values. External call detected without guard.",
+                            line_number=function.get('start_pos', 0),
+                            code_snippet=f"Function: {func_name}",
+                            recommendation="Add reentrancy guard (nonReentrant modifier) and follow Checks-Effects-Interactions pattern"
+                        )
+                        vulnerabilities.append(vuln)
+            
+            # 2. Check for DoS with loop-based inputs
+            if self._has_loops(func_body):
+                # Large input might cause DoS - safely check for int values
+                large_int_inputs = [inp for inp in inputs if isinstance(inp, int) and inp > 1000]
+                if large_int_inputs:
+                    max_val = safe_max_int(inputs)
                     vuln = self._create_vulnerability(
-                        vuln_type="Reentrancy (Fuzzing)",
+                        vuln_type="DoS (Fuzzing)",
                         severity="High",
-                        description=f"Potential reentrancy in '{func_name}' with large input values. External call detected without guard.",
+                        description=f"Potential DoS in '{func_name}' with large input ({max_val}). Loop may exhaust gas.",
                         line_number=function.get('start_pos', 0),
-                        code_snippet=f"Function: {func_name}",
-                        recommendation="Add reentrancy guard (nonReentrant modifier) and follow Checks-Effects-Interactions pattern"
+                        code_snippet=f"Function: {func_name} with input: {inputs}",
+                        recommendation="Limit loop iterations or use pagination/batching to prevent gas exhaustion"
                     )
                     vulnerabilities.append(vuln)
-        
-        # 2. Check for DoS with loop-based inputs
-        if self._has_loops(func_body):
-            # Large input might cause DoS
-            if any(isinstance(inp, int) and inp > 1000 for inp in inputs):
-                vuln = self._create_vulnerability(
-                    vuln_type="DoS (Fuzzing)",
-                    severity="High",
-                    description=f"Potential DoS in '{func_name}' with large input ({max(inputs) if inputs else 'N/A'}). Loop may exhaust gas.",
-                    line_number=function.get('start_pos', 0),
-                    code_snippet=f"Function: {func_name} with input: {inputs}",
-                    recommendation="Limit loop iterations or use pagination/batching to prevent gas exhaustion"
-                )
-                vulnerabilities.append(vuln)
-        
-        # 3. Check for overflow with arithmetic operations
-        if self._has_arithmetic(func_body):
-            # Very large inputs might cause overflow
-            if any(isinstance(inp, int) and inp > 2**200 for inp in inputs):
-                vuln = self._create_vulnerability(
-                    vuln_type="Integer Overflow (Fuzzing)",
-                    severity="High",
-                    description=f"Potential overflow in '{func_name}' with very large input. Arithmetic operation may overflow.",
-                    line_number=function.get('start_pos', 0),
-                    code_snippet=f"Function: {func_name} with input: {inputs}",
-                    recommendation="Use SafeMath or Solidity 0.8+ with overflow checks"
-                )
-                vulnerabilities.append(vuln)
-        
-        # 4. Check for access control bypass with zero/edge inputs
-        if self._is_critical_function(func_name):
-            # Zero or edge inputs might bypass checks
-            if any(inp == 0 or inp == '' for inp in inputs):
-                if not self._has_access_control(function):
+            
+            # 3. Check for overflow with arithmetic operations
+            if self._has_arithmetic(func_body):
+                # Very large inputs might cause overflow - safely check for int values
+                very_large_int_inputs = [inp for inp in inputs if isinstance(inp, int) and inp > 2**200]
+                if very_large_int_inputs:
                     vuln = self._create_vulnerability(
-                        vuln_type="Access Control (Fuzzing)",
-                        severity="Medium",
-                        description=f"Potential access control issue in '{func_name}' with edge input (0/empty). Critical function may be unprotected.",
+                        vuln_type="Integer Overflow (Fuzzing)",
+                        severity="High",
+                        description=f"Potential overflow in '{func_name}' with very large input. Arithmetic operation may overflow.",
                         line_number=function.get('start_pos', 0),
-                        code_snippet=f"Function: {func_name}",
-                        recommendation="Add access control modifiers (onlyOwner, onlyRole, etc.)"
+                        code_snippet=f"Function: {func_name} with input: {inputs}",
+                        recommendation="Use SafeMath or Solidity 0.8+ with overflow checks"
                     )
                     vulnerabilities.append(vuln)
+            
+            # 4. Check for access control bypass with zero/edge inputs
+            if self._is_critical_function(func_name):
+                # Zero or edge inputs might bypass checks - safely check
+                edge_inputs = [inp for inp in inputs if inp == 0 or inp == '']
+                if edge_inputs:
+                    if not self._has_access_control(function):
+                        vuln = self._create_vulnerability(
+                            vuln_type="Access Control (Fuzzing)",
+                            severity="Medium",
+                            description=f"Potential access control issue in '{func_name}' with edge input (0/empty). Critical function may be unprotected.",
+                            line_number=function.get('start_pos', 0),
+                            code_snippet=f"Function: {func_name}",
+                            recommendation="Add access control modifiers (onlyOwner, onlyRole, etc.)"
+                        )
+                        vulnerabilities.append(vuln)
+        except Exception as e:
+            # If there's an error during analysis, don't add any vulnerabilities
+            # This prevents partial results when errors occur
+            print(f"Error in fuzzing analysis for function {func_name}: {e}")
+            return []  # Return empty list on error
         
         return vulnerabilities
     

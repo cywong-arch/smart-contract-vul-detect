@@ -1253,10 +1253,29 @@ HTML_TEMPLATE = """
             let statsHTML = '<div class="stats-grid" style="margin-bottom: 25px;">';
             statsHTML += `<div class="stat-card"><div class="stat-value">${results.total_vulnerabilities}</div><div class="stat-label">Total Vulnerabilities</div></div>`;
             
+            // Add detector results
             for (const [detector, count] of Object.entries(results.detector_results)) {
                 const detectorName = detector.replace('Detector', '').replace(/([A-Z])/g, ' $1').trim();
                 statsHTML += `<div class="stat-card"><div class="stat-value">${count}</div><div class="stat-label">${detectorName}</div></div>`;
             }
+            
+            // ALWAYS add fuzzing stats for .sol files (even if there are errors or 0 results)
+            const filename = results.contract_file || '';
+            const isSolFile = filename.toLowerCase().endsWith('.sol');
+            
+            if (results.advanced_analysis && results.advanced_analysis.fuzzing) {
+                const fuzzing = results.advanced_analysis.fuzzing;
+                const metrics = fuzzing.metrics || {};
+                const fuzzingVulns = metrics.vulnerabilities_found || 0;
+                // Always show fuzzing card for .sol files
+                if (isSolFile) {
+                    statsHTML += `<div class="stat-card"><div class="stat-value">${fuzzingVulns}</div><div class="stat-label">Fuzzing Vulnerabilities</div></div>`;
+                }
+            } else if (isSolFile) {
+                // If fuzzing wasn't run but it's a .sol file, show 0
+                statsHTML += `<div class="stat-card"><div class="stat-value">0</div><div class="stat-label">Fuzzing Vulnerabilities</div></div>`;
+            }
+            
             statsHTML += '</div>';
             
             // Create text output
@@ -1270,31 +1289,46 @@ HTML_TEMPLATE = """
                 output += `${detector}: ${count} issues\n`;
             }
             
-            // Show fuzzing metrics only if successfully executed (no errors)
+            // ALWAYS show fuzzing metrics for .sol files, even if there are errors
+            // Display this right after summary, before other advanced analysis
             if (results.advanced_analysis && results.advanced_analysis.fuzzing) {
                 const fuzzing = results.advanced_analysis.fuzzing;
-                
-                // Only show if there's no error (successful execution)
-                if (!fuzzing.error) {
                 const metrics = fuzzing.metrics || {};
                 
+                // Always display fuzzing analysis for .sol files
                 output += `\n🧪 Fuzzing Analysis:\n`;
-                    output += `  Functions tested: ${metrics.functions_tested || 0}\n`;
-                    output += `  Iterations: ${metrics.iterations || 0}\n`;
-                    output += `  Fuzzing vulnerabilities: ${metrics.vulnerabilities_found || 0}\n`;
-                    
-                    if (metrics.vulnerabilities_found === 0) {
-                        output += `  ✅ No input-dependent vulnerabilities found\n`;
-                    }
-                    
-                    // Show warnings if any
-                    if (fuzzing.warnings && fuzzing.warnings.length > 0) {
-                        fuzzing.warnings.forEach(warning => {
-                            output += `  ⚠️  ${warning}\n`;
-                        });
-                    }
+                
+                // Show error if present
+                if (fuzzing.error) {
+                    output += `  ⚠️  Error: ${fuzzing.error}\n`;
                 }
-                // If there's an error, don't show fuzzing section at all
+                
+                // Display metrics (will be 0 if there was an error)
+                output += `  Functions tested: ${metrics.functions_tested || 0}\n`;
+                output += `  Iterations: ${metrics.iterations || 0}\n`;
+                output += `  Fuzzing vulnerabilities: ${metrics.vulnerabilities_found || 0}\n`;
+                
+                // Show success message if no errors and no vulnerabilities
+                if (!fuzzing.error && metrics.vulnerabilities_found === 0) {
+                    output += `  ✅ No input-dependent vulnerabilities found\n`;
+                }
+                
+                // Show warnings if any
+                if (fuzzing.warnings && fuzzing.warnings.length > 0) {
+                    fuzzing.warnings.forEach(warning => {
+                        output += `  ⚠️  ${warning}\n`;
+                    });
+                }
+            } else {
+                // If fuzzing wasn't run but it's a .sol file, show a message
+                const filename = results.contract_file || '';
+                if (filename.toLowerCase().endsWith('.sol')) {
+                    output += `\n🧪 Fuzzing Analysis:\n`;
+                    output += `  ⚠️  Fuzzing analysis was not executed\n`;
+                    output += `  Functions tested: 0\n`;
+                    output += `  Iterations: 0\n`;
+                    output += `  Fuzzing vulnerabilities: 0\n`;
+                }
             }
             
             // Show optimization metrics only if successfully executed (no errors)
@@ -1674,12 +1708,6 @@ def analyze():
             all_vulnerabilities = parallel_detect(detectors, contract_ast)
             perf_monitor.end("detection")
             
-            # Calculate detector results for summary
-            detector_results = {}
-            for vuln in all_vulnerabilities:
-                detector_name = vuln.get('detector', 'Unknown')
-                detector_results[detector_name] = detector_results.get(detector_name, 0) + 1
-            
             # Advanced analysis modules (Fuzzing and Optimization)
             # Note: Fuzzing only works with Solidity files, Optimization only with bytecode
             advanced_results = {}
@@ -1728,50 +1756,80 @@ def analyze():
                         'metrics': {'optimizations_found': 0, 'total_savings': 0}
                     }
             
-            if enable_fuzzing:
-                if is_bytecode:
+            # ALWAYS run fuzzing for Solidity files (.sol), regardless of enable_fuzzing flag
+            # This ensures consistent behavior - fuzzing is auto-enabled for all .sol files
+            if is_bytecode:
+                # Bytecode files don't support fuzzing
+                if enable_fuzzing:
                     print("Note: Fuzzing is only available for Solidity files, not bytecode")
                     advanced_results['fuzzing'] = {
                         'error': 'Fuzzing only works with Solidity files, not bytecode',
                         'metrics': {'functions_tested': 0, 'iterations': 0, 'vulnerabilities_found': 0}
                     }
-                else:
-                    try:
-                        from analysis.fuzzer import Fuzzer
-                        print("Starting fuzzing analysis...")
-                        perf_monitor.start("fuzzing")
-                        fuzzer = Fuzzer()
-                        fuzzer.enable()
-                        print(f"Fuzzer enabled, analyzing contract...")
-                        fuzzing_results = fuzzer.analyze(contract_ast)
-                        perf_monitor.end("fuzzing")
-                        advanced_results['fuzzing'] = fuzzing_results
-                        
-                        # Extract vulnerabilities from fuzzing results
+            else:
+                # For Solidity files, ALWAYS run fuzzing (even if enable_fuzzing was false)
+                # This ensures all .sol files get fuzzing analysis
+                try:
+                    from analysis.fuzzer import Fuzzer
+                    print("Starting fuzzing analysis for Solidity file...")
+                    perf_monitor.start("fuzzing")
+                    fuzzer = Fuzzer()
+                    fuzzer.enable()
+                    print(f"Fuzzer enabled, analyzing contract...")
+                    fuzzing_results = fuzzer.analyze(contract_ast)
+                    perf_monitor.end("fuzzing")
+                    advanced_results['fuzzing'] = fuzzing_results
+                    
+                    # Only add fuzzing vulnerabilities if fuzzing completed successfully (no errors)
+                    # Check for errors in the results
+                    has_error = fuzzing_results.get('error') or (fuzzing_results.get('errors') and len(fuzzing_results.get('errors', [])) > 0)
+                    
+                    if not has_error:
+                        # Extract vulnerabilities from fuzzing results only if no error
                         fuzzing_vulns = fuzzing_results.get('vulnerabilities', [])
                         if fuzzing_vulns:
                             print(f"Fuzzing found {len(fuzzing_vulns)} vulnerabilities")
                             all_vulnerabilities.extend(fuzzing_vulns)
                         else:
                             print("Fuzzing found no vulnerabilities")
-                        
-                        print(f"Fuzzing analysis completed. Metrics: {fuzzing_results.get('metrics', {})}")
-                    except ImportError as e:
-                        error_msg = f"Warning: Fuzzing module not available: {e}"
-                        print(error_msg)
-                        advanced_results['fuzzing'] = {
-                            'error': error_msg,
-                            'metrics': {'functions_tested': 0, 'iterations': 0, 'vulnerabilities_found': 0}
-                        }
-                    except Exception as e:
-                        error_msg = f"Error in fuzzing: {e}"
-                        print(error_msg)
-                        import traceback
-                        traceback.print_exc()
-                        advanced_results['fuzzing'] = {
-                            'error': error_msg,
-                            'metrics': {'functions_tested': 0, 'iterations': 0, 'vulnerabilities_found': 0}
-                        }
+                    else:
+                        # If there's an error, don't add any vulnerabilities and reset metrics
+                        error_msg = fuzzing_results.get('error', 'Unknown fuzzing error')
+                        print(f"Fuzzing encountered an error: {error_msg}")
+                        print("Not adding fuzzing vulnerabilities due to error")
+                        # Ensure metrics show 0 vulnerabilities if there was an error
+                        if 'metrics' not in fuzzing_results:
+                            fuzzing_results['metrics'] = {}
+                        fuzzing_results['metrics']['vulnerabilities_found'] = 0
+                        # Clear any vulnerabilities that might have been found before the error
+                        fuzzing_results['vulnerabilities'] = []
+                    
+                    print(f"Fuzzing analysis completed. Metrics: {fuzzing_results.get('metrics', {})}")
+                except ImportError as e:
+                    error_msg = f"Warning: Fuzzing module not available: {e}"
+                    print(error_msg)
+                    advanced_results['fuzzing'] = {
+                        'error': error_msg,
+                        'metrics': {'functions_tested': 0, 'iterations': 0, 'vulnerabilities_found': 0}
+                    }
+                except Exception as e:
+                    error_msg = f"Error in fuzzing: {e}"
+                    print(error_msg)
+                    import traceback
+                    traceback.print_exc()
+                    advanced_results['fuzzing'] = {
+                        'error': error_msg,
+                        'metrics': {'functions_tested': 0, 'iterations': 0, 'vulnerabilities_found': 0}
+                    }
+            
+            # Calculate detector results for summary AFTER all vulnerabilities are added (including fuzzing)
+            detector_results = {}
+            for vuln in all_vulnerabilities:
+                detector_name = vuln.get('detector', 'Unknown')
+                # Handle fuzzing vulnerabilities - they might have 'Fuzzer' or 'Fuzzing' as detector
+                if 'fuzzing' in detector_name.lower() or 'fuzzer' in detector_name.lower():
+                    detector_name = 'Fuzzing'
+                detector_results[detector_name] = detector_results.get(detector_name, 0) + 1
             
             # Add performance metrics
             perf_monitor.end("total_analysis")
